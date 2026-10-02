@@ -101,11 +101,15 @@ C_CurrencyInfo = { GetCurrencyListSize = function() return 1 end, GetCurrencyLis
 C_TradeSkillUI = { GetChildProfessionInfo = function() return nil end }
 C_MajorFactions = { GetMajorFactionIDs = function() return { 1 } end, GetMajorFactionData = function() return { name = "Faction", renownLevel = 5, renownReputationEarned = 100, renownLevelThreshold = 2500 } end }
 C_Item = { GetItemInfo = function(x) return "Item", "|Hitem:" .. tostring(x) .. "|h[Item]|h", MOCK_QUALITY or 0, 1, 1, "Armor", "Cloth", 1, "INVTYPE_HEAD", 1, 50, 4, 1, 1, 11, nil end,
-  GetItemIconByID = function() return 1 end, GetCurrentItemLevel = function() return 100 end }
+  GetItemIconByID = function() return 1 end, GetItemInfoInstant = function(id) return id, "Armor", "Plate", "INVTYPE_CHEST", 1, 4, 4 end, GetCurrentItemLevel = function() return 100 end }
 C_MountJournal = { GetMountFromItem = function(id) if id == 50818 then return 363 end end, GetMountInfoByID = function() return "Invincible", 1, 1, false, true, 0, false, false, 0, false, false end }
 C_PetJournal = { GetPetInfoByItemID = function() return nil end }
 C_ToyBox = { GetToyInfo = function() return nil end }
-C_TransmogCollection = { GetItemInfo = function() return 10, 20 end, GetAppearanceInfoBySource = function() return { appearanceIsCollected = MOCK_COLLECTED or false } end }
+C_TransmogCollection = { GetItemInfo = function(x)
+    local id = tonumber(tostring(x):match("item:(%d+)") or x)
+    if id and id >= 2000 and id < 3000 then return id, id * 10 + (tonumber(tostring(x):match("item:%d+:(%d+)")) or 0) end
+    return 10, 20 end,
+  GetAppearanceInfoBySource = function(src) if MOCK_COLLECTED_SRC and MOCK_COLLECTED_SRC[src] then return { appearanceIsCollected = true, sourceIsCollected = true } end return { appearanceIsCollected = MOCK_COLLECTED or false, sourceIsCollected = false } end }
 C_Container = { GetContainerNumSlots = function(b) return b == 0 and 2 or 0 end,
   GetContainerItemInfo = function(b, s) return { itemID = 1000 + s, hyperlink = "|Hitem:" .. (1000 + s) .. "|h[X]|h", stackCount = 1, iconFileID = 1 } end,
   UseContainerItem = function(b, s) MOCK_SOLD = (MOCK_SOLD or 0) + 1 end }
@@ -114,8 +118,24 @@ C_EquipmentSet = { GetEquipmentSetIDs = function() return {} end }
 ItemLocation = { CreateFromBagAndSlot = function() return {} end }
 TooltipDataProcessor = { AddTooltipPostCall = function(t, fn) MOCK_TTFN = fn end }
 MenuUtil = { CreateContextMenu = function(owner, gen) local root; root = { CreateTitle = function() end, CreateButton = function() return root end, SetEnabled = function() end }; gen(owner, root) end }
-EJ_GetNumTiers = function() return 1 end; EJ_GetTierInfo = function() return "Tier" end; EJ_SelectTier = function() end; EJ_GetCurrentTier = function() return 1 end
-EJ_GetInstanceByIndex = function(i, raid) if i == 1 then return 1, "Raid" end end; EJ_GetInstanceInfo = function() return "Raid", nil, nil, nil, nil, nil, nil, nil, nil, 999 end
-EJ_SelectInstance = function() end; EJ_GetEncounterInfoByIndex = function(e) if e <= 2 then return "Boss" .. e end end
+EJ_GetNumTiers = function() return 1 end; EJ_GetTierInfo = function() return "Wrath of the Lich King" end; EJ_SelectTier = function() end; EJ_GetCurrentTier = function() return 1 end
+EJ_GetInstanceByIndex = function(i, raid) if i == 1 and raid then return 758, "Icecrown Citadel" end end
+EJ_GetInstanceInfo = function() return "Icecrown Citadel", nil, nil, nil, nil, nil, nil, nil, nil, 631 end
+EJ_SelectInstance = function() end
+EJ_GetEncounterInfoByIndex = function(e) local n = { "Lord Marrowgar", "The Lich King" } if n[e] then return n[e], nil, e end end
+EJ_IsValidInstanceDifficulty = function(d) return d == 6 or d == 5 end
+EJ_SetDifficulty = function(d) MOCK_EJ_DIFF = d end
+EJ_SetLootFilter = function(c, sp) MOCK_EJ_FILTER = c end
+EJ_GetLootFilter = function() return 8, 0 end
+local lootReads = 0
+EJ_GetNumLoot = function() return 4 end
+C_EncounterJournal = { GetLootInfoByIndex = function(i)
+  lootReads = lootReads + 1
+  local items = { { itemID = 50818, encounterID = 2 }, { itemID = 2001, encounterID = 1 }, { itemID = 2002, encounterID = 2 }, { itemID = 2003, encounterID = 2 } }
+  local it = items[i]
+  if lootReads <= 4 then return { itemID = it.itemID, encounterID = it.encounterID } end -- first pass: not loaded yet
+  return { itemID = it.itemID, encounterID = it.encounterID, link = "|Hitem:" .. it.itemID .. ":" .. MOCK_EJ_DIFF .. "|h[x]|h" }
+end }
+function GetBuildInfo() return "12.1.5", "99999", "Oct 1 2026", 120105 end
 Settings = { RegisterCanvasLayoutCategory = function(p, n) return { GetID = function() return 1 end } end, RegisterAddOnCategory = function() end, OpenToCategory = function() MOCK_SETTINGS_OPENED = true end }
 SlashCmdList = {}

@@ -69,11 +69,25 @@ RR:RegisterItem({
 
 Statussen per karakter: **Chance** (nog een kill/loot-roll beschikbaar), **Locked** (deze reset al gedood), **No** (niet geschikt), **?** (karakter nog niet gescand). Er worden nooit dropkansen getoond. Mounts, pets, toys en transmog worden account-breed als "collected" herkend en grijs getoond of verborgen (instelbaar). Het tabblad *Mounts* sorteert gevolgde mounts op het aantal karakters dat nog een kans heeft.
 
+## Collections: ontbrekende mounts en transmog per raid
+
+Module **Collections** (standaard aan), tabblad **Transmog**:
+
+- Klik één keer op **Scan journal** (en opnieuw na een patch; het tabblad waarschuwt als de data van een oudere game-versie is). De scan loopt alle raids en dungeons van alle expansies langs, per moeilijkheid. Hij duurt ongeveer een minuut, pauzeert in combat en draait niet als de Adventure Guide open is. Het lootfilter van de journal wordt daarna teruggezet.
+- Per raid en moeilijkheid zie je **hoeveel appearances je nog mist** (bijv. `14/120`), met een uitsplitsing per armortype in de tooltip. Klik op een rij om per boss te zien wat er mist (tooltip met itemnamen).
+- De karakterkolommen tonen per raid hoeveel bosses met ontbrekende loot dat karakter deze reset nog kan doen (`3/5`), en per boss *Chance/Locked*.
+- Filters: raids, dungeons of alles, sorteren op expansie of op meeste missende items, complete raids verbergen. Optie "completionist" telt elk item-source in plaats van unieke appearances.
+- **Ontbrekende mounts automatisch:** elke boss-drop mount uit de journal die je nog niet hebt, komt vanzelf in Farm Targets (gemarkeerd als *auto*), met de juiste boss en moeilijkheden. Rechtsklik verbergt er één. Een auto-target vervangt de starterregel voor hetzelfde item.
+
+Beperkingen: alleen loot die de journal als bossdrop toont. Mounts van rare spawns, reputatie of achievements, en tier-stukken die uit tokens komen, worden niet gevonden. "Mist" geldt voor je hele account.
+
 ## Gebruikte API's en events
 
 **Reset:** `C_DateAndTime.GetSecondsUntilDailyReset`, `C_DateAndTime.GetSecondsUntilWeeklyReset` (fallback `GetQuestResetTime`). De tijden komen van de client, dus EU/US gaat vanzelf goed. Elke opgeslagen waarde krijgt een `expires`-tijdstempel. Bij login, bij elke scan en bij het openen van het venster gaat alles wat verlopen is terug naar "open", voor álle karakters. Een alt die drie weken offline was, staat dus correct op open.
 
 **Checklist:** `C_WeeklyRewards.GetActivities` / `HasAvailableRewards`, `C_MythicPlus.GetOwnedKeystoneChallengeMapID` / `GetOwnedKeystoneLevel` / `GetRunHistory` / `RequestMapInfo`, `C_ChallengeMode.GetMapUIInfo`, `RequestRaidInfo` + `GetNumSavedInstances` / `GetSavedInstanceInfo` / `GetSavedInstanceEncounterInfo`, `GetNumSavedWorldBosses` / `GetSavedWorldBossInfo`, `C_QuestLog.GetInfo` (frequency Daily/Weekly) / `IsQuestFlaggedCompleted` / `IsOnQuest`, `C_CurrencyInfo.GetCurrencyListInfo` / `GetCurrencyListLink` / `GetCurrencyIDFromLink` / `GetCurrencyInfo`, `GetProfessions` / `GetProfessionInfo`, `C_TradeSkillUI.GetChildProfessionInfo` / `GetConcentrationCurrencyID`, `C_MajorFactions.GetMajorFactionIDs` / `GetMajorFactionData`, `C_Calendar.OpenCalendar` / `GetNumDayEvents` / `GetDayEvent`.
+
+**Collections:** `EJ_SelectInstance` / `EJ_SetDifficulty` / `EJ_IsValidInstanceDifficulty` / `EJ_SetLootFilter` / `EJ_GetLootFilter` / `EJ_GetNumLoot`, `C_EncounterJournal.GetLootInfoByIndex` / `SetSlotFilter`, `C_Item.GetItemInfoInstant`, `GetBuildInfo`. Niet in-game geverifieerd: dat `GetLootInfoByIndex` zonder geselecteerde boss alle loot van de instance geeft met een link voor de gekozen moeilijkheid.
 
 **Farm Targets:** `C_MountJournal.GetMountFromItem` / `GetMountInfoByID`, `C_PetJournal.GetPetInfoByItemID` / `GetNumCollectedInfo`, `C_ToyBox.GetToyInfo`, `PlayerHasToy`, `C_TransmogCollection.GetItemInfo` / `GetAppearanceInfoBySource`, `EJ_GetNumTiers` / `EJ_GetTierInfo` / `EJ_SelectTier` / `EJ_GetInstanceByIndex` / `EJ_GetInstanceInfo` / `EJ_GetEncounterInfoByIndex`, `GetDifficultyInfo`.
 

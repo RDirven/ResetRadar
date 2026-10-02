@@ -127,13 +127,38 @@ function M:AddTarget(itemID, sources)
 end
 
 function M:RemoveTarget(id)
+  if type(id) == "string" and id:match("^auto:") then
+    local coll = RR.modules.Collections
+    if coll and coll.db then coll:HideAutoMount(tonumber(id:match("^auto:(%d+)"))) end
+    return
+  end
   self.db.targets[id] = nil
   self.db.collected[id] = nil
   RR:RefreshUI()
 end
 
+-- Own targets plus the boss-drop mounts found by the Collections module. An auto target replaces a starter entry
+-- for the same item (journal data is more precise); a target you added yourself always wins.
+function M:AllTargets()
+  local list, autoItems, ownItems = {}, {}, {}
+  local coll = RR.modules.Collections
+  local auto = (coll and RR:IsModuleActive("Collections")) and coll:GetAutoMountTargets() or {}
+  for _, target in ipairs(auto) do autoItems[target.itemID] = true end
+  for _, target in pairs(self.db.targets) do
+    if not target.starter then ownItems[target.itemID] = true end
+  end
+  for _, target in pairs(self.db.targets) do
+    if not (target.starter and autoItems[target.itemID]) then list[#list + 1] = target end
+  end
+  for _, target in ipairs(auto) do
+    if not ownItems[target.itemID] then list[#list + 1] = target end
+  end
+  return list
+end
+
 function M:UpdateCollected()
-  for id, target in pairs(self.db.targets) do
+  for _, target in ipairs(self:AllTargets()) do
+    local id = target.id
     if target.kind == nil or target.kind == "item" then
       local kind, extra = detectKind(target.itemID)
       target.kind = kind
@@ -249,8 +274,8 @@ end
 
 function M:ActiveTargets(kindFilter)
   local list = {}
-  for id, target in pairs(self.db.targets) do
-    local collected = self.db.collected[id]
+  for _, target in ipairs(self:AllTargets()) do
+    local collected = self.db.collected[target.id]
     if (not collected or self.db.collectedMode == "show") and (not kindFilter or target.kind == kindFilter) then
       list[#list + 1] = target
     end
@@ -318,8 +343,8 @@ end
 
 function M:CountWithChance(charKey)
   local list = {}
-  for id, target in pairs(self.db.targets) do
-    if not self.db.collected[id] and self:Status(charKey, target) == "chance" then list[#list + 1] = itemName(target) end
+  for _, target in ipairs(self:AllTargets()) do
+    if not self.db.collected[target.id] and self:Status(charKey, target) == "chance" then list[#list + 1] = itemName(target) end
   end
   table.sort(list)
   return list
@@ -540,6 +565,7 @@ local function targetRow(target)
   local srcText = target.sources[1] and M:SourceText(target.sources[1]) or ""
   if #target.sources > 1 then srcText = srcText .. string.format(" +%d", #target.sources - 1) end
   if collected then label = label .. " |cff40ff40(" .. L.FARM_COLLECTED_SHORT .. ")|r" end
+  if target.auto then label = label .. " |cff8080ff(" .. L.FARM_AUTO .. ")|r" end
   return {
     label = label .. "  |cff808080" .. srcText .. "|r",
     icon = itemIcon(target), dim = collected,
@@ -547,7 +573,7 @@ local function targetRow(target)
     onRightClick = function(owner)
       RR.ShowMenu(owner, {
         { text = itemName(target), isTitle = true },
-        { text = L.FARM_REMOVE, func = function() M:RemoveTarget(target.id) end },
+        { text = target.auto and L.FARM_HIDE_AUTO or L.FARM_REMOVE, func = function() M:RemoveTarget(target.id) end },
       })
     end,
     cell = function(charKey)

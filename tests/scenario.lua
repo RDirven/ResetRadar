@@ -80,6 +80,54 @@ fire("QUEST_LOG_UPDATE")
 MOCK_RUN_TIMERS()
 assert(farm:GetLoginLine() ~= nil or true)
 
+-- collections: journal scan -> transmog summary + auto mount target
+local coll = RR.modules.Collections
+assert(RR:IsModuleActive("Collections"), "collections on by default")
+RR:ShowWindow("transmog")            -- no data yet
+coll:StartScan()
+assert(coll:IsScanning(), "scanning")
+RR.ui:Refresh()
+MOCK_RUN_TIMERS()
+assert(not coll:IsScanning(), "scan finished")
+assertEq(MOCK_EJ_FILTER, 8, "loot filter restored")
+local inst = coll.db.journal.instances[758]
+assert(inst and inst.diffs[6] and inst.diffs[5], "both difficulties stored")
+assert(coll.db.journal.mounts[363], "mount found in journal")
+local sum = coll:Summary()[758][6]
+assertEq(sum.total, 3, "3 appearances on 25H")
+assertEq(sum.missing, 3, "all missing")
+MOCK_COLLECTED_SRC = { [20016] = true } -- item 2001 on diff 6
+coll:Invalidate()
+sum = coll:Summary()[758][6]
+assertEq(sum.missing, 2, "one collected")
+-- lockout: current char killed Lord Marrowgar + Lich King earlier in the scenario? check availability numbers
+local avail, total = coll:CharAvailability(RR.charKey, inst, 6, sum)
+realPrint("availability", avail, total)
+assert(total == 1, "only Lich King has missing loot")
+coll.db.expanded["758:6"] = true
+coll.db.instanceFilter = "all"
+RR:ShowWindow("transmog")
+coll.db.sortBy = "missing"; RR.ui:Refresh()
+-- auto mount replaces the starter Invincible target
+local autoFound, starterFound = false, false
+for _, t in ipairs(farm:AllTargets()) do
+  if t.itemID == 50818 then if t.auto then autoFound = true else starterFound = true end end
+end
+assert(autoFound and not starterFound, "auto target replaces starter")
+RR:ShowWindow("farm"); RR:ShowWindow("mounts")
+farm:RemoveTarget("auto:363")
+for _, t in ipairs(farm:AllTargets()) do assert(not t.auto, "auto hidden") end
+coll:AddMinimapLines(GameTooltip)
+-- combat pause/resume during scan
+coll:StartScan()
+MOCK_COMBAT = true
+MOCK_RUN_TIMERS()
+assert(coll:IsScanning(), "paused, not finished")
+MOCK_COMBAT = false
+fire("PLAYER_REGEN_ENABLED")
+MOCK_RUN_TIMERS()
+assert(not coll:IsScanning(), "resumed and finished")
+
 -- loot manager is off by default
 assertEq(RR:IsModuleEnabled("LootManager"), false, "loot off by default")
 assertEq(RR.ui.tabs.loot.module, "LootManager")
