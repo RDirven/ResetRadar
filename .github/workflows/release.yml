@@ -1,0 +1,33 @@
+# Bij een tag-push (bijv. v1.0.1): tests draaien, daarna zip bouwen en uploaden naar CurseForge + GitHub Releases.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # nodig voor de changelog tussen tags
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tests (Lua 5.1 met gesimuleerde WoW-API)
+        run: |
+          pip install lupa
+          python tests/run.py
+
+      - name: Package en upload
+        uses: BigWigsMods/packager@v2
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
