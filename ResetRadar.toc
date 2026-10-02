@@ -1,0 +1,15 @@
+## Interface: 120105, 120100, 120005, 120001, 120000
+## Title: ResetRadar - Weekly & Daily Checklist
+## Notes: Daily and weekly checklist across all your characters, with Farm Targets and an optional Loot Manager.
+## Author: Robert-Jan
+## Version: @project-version@
+## SavedVariables: ResetRadarDB
+## IconTexture: Interface\Icons\INV_Misc_Note_02
+
+Locales.lua
+Core.lua
+Checklist.lua
+UI.lua
+Settings.lua
+Modules\FarmTargets.lua
+Modules\LootManager.lua

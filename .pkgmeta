@@ -1,0 +1,8 @@
+package-as: ResetRadar
+
+ignore:
+  - tests
+  - .github
+  - .gitignore
+
+enable-nolib-creation: no
