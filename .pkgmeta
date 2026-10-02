@@ -2,6 +2,7 @@ package-as: ResetRadar
 
 ignore:
   - tests
+  - media
   - .github
   - .gitignore
 

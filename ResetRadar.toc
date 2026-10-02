@@ -4,6 +4,8 @@
 ## Author: Robert-Jan
 ## Version: @project-version@
 ## SavedVariables: ResetRadarDB
+## X-Curse-Project-ID: 1722405
+## X-License: MIT
 ## IconTexture: Interface\Icons\INV_Misc_Note_02
 
 Locales.lua
