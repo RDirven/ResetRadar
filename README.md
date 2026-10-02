@@ -128,7 +128,7 @@ Releases gaan automatisch via GitHub Actions ([.github/workflows/release.yml](.g
 ```bash
 git add -A
 git commit -m "Beschrijving van de wijziging"
-git tag v1.0.1
+git tag -a v1.0.1 -m "v1.0.1"
 git push --follow-tags
 ```
 
