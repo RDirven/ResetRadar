@@ -576,6 +576,36 @@ local function buildChecklistRows(columns)
     end
   end
 
+  -- rows from modules (e.g. wanted loot). A row with a path can be hidden like any other row.
+  for _, mod in ipairs(RR.moduleOrder) do
+    if RR:IsModuleActive(mod.name) then
+      local ok, modRows = RR:ModuleCall(mod, "GetChecklistRows", columns)
+      if ok and modRows then
+        for _, row in ipairs(modRows) do
+          local path = row.path
+          local hidden = path and settings.hiddenRows[path]
+          if not hidden or settings.showHidden then
+            if path then
+              row.dim = row.dim or hidden
+              local baseLabel, baseCell = row.label, row.cell
+              row.onRightClick = row.onRightClick or function(owner) rowHiddenMenu(owner, path, baseLabel) end
+              row.cell = baseCell and function(charKey)
+                local char = db.chars[charKey]
+                if char.hiddenItems[path] then
+                  return settings.showHidden and "|cff606060" .. L.HIDDEN .. "|r" or "", nil, nil,
+                    function(owner) rowHiddenMenu(owner, path, baseLabel, charKey) end
+                end
+                local text, tip, click = baseCell(charKey)
+                return text, tip, click, function(owner) rowHiddenMenu(owner, path, baseLabel, charKey) end
+              end
+            end
+            rows[#rows + 1] = row
+          end
+        end
+      end
+    end
+  end
+
   -- manual items
   local manualIds = {}
   for id in pairs(db.account.manual) do manualIds[#manualIds + 1] = id end

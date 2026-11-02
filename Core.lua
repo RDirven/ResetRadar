@@ -435,6 +435,9 @@ function RR:GetSummary(charKey)
     local state = self:GetManualState(id, charKey)
     count("manual:" .. id, item.resetType, state and state.done and "done" or "open", item.label)
   end
+  for _, mod in ipairs(self.moduleOrder) do
+    if self:IsModuleActive(mod.name) then self:ModuleCall(mod, "AddSummaryEntries", charKey, count) end
+  end
   return s
 end
 

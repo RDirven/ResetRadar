@@ -99,6 +99,14 @@ local function isCollected(target)
   elseif kind == "toy" then
     if not PlayerHasToy then return nil end
     return PlayerHasToy(target.itemID) and true or false
+  elseif kind == "transmog" and target.sourceByDiff then
+    -- wanted from the journal: every wanted difficulty has its own appearance
+    for _, sourceID in pairs(target.sourceByDiff) do
+      local info = RR.Call("C_TransmogCollection.GetAppearanceInfoBySource", sourceID)
+      if not info then return nil end
+      if not info.appearanceIsCollected then return false end
+    end
+    return true
   elseif kind == "transmog" then
     local _, sourceID = RR.Call("C_TransmogCollection.GetItemInfo", target.itemID)
     if not sourceID then return nil end
@@ -135,6 +143,113 @@ function M:RemoveTarget(id)
   self.db.targets[id] = nil
   self.db.collected[id] = nil
   RR:RefreshUI()
+end
+
+-- ---------- "Want" from the Adventure Guide ----------
+-- ctx = { itemID, link, difficulty, mapID, instance, encounter, isRaid }. One target per item; each click adds or
+-- removes the selected difficulty. Wanted items appear as rows in the checklist.
+
+function M:FindWant(itemID)
+  for _, target in pairs(self.db.targets) do
+    if target.want and target.itemID == itemID then return target end
+  end
+end
+
+function M:IsWanted(itemID, difficulty)
+  local target = self:FindWant(itemID)
+  if not target then return false end
+  for _, d in ipairs(target.sources[1].difficulties) do
+    if d == difficulty then return true end
+  end
+  return false
+end
+
+function M:ToggleWant(ctx)
+  local target = self:FindWant(ctx.itemID)
+  local d = ctx.difficulty
+  if target then
+    local diffs = target.sources[1].difficulties
+    for i, existing in ipairs(diffs) do
+      if existing == d then
+        table.remove(diffs, i)
+        if target.sourceByDiff then target.sourceByDiff[d] = nil end
+        if #diffs == 0 then self:RemoveTarget(target.id) else RR:RefreshUI() end
+        return false
+      end
+    end
+    diffs[#diffs + 1] = d
+  else
+    local kind, extra = detectKind(ctx.itemID)
+    local id = self.db.nextId
+    self.db.nextId = id + 1
+    target = {
+      id = id, itemID = ctx.itemID, kind = kind, want = true,
+      sources = { {
+        type = "lockout", mapID = ctx.mapID, instance = ctx.instance, encounter = ctx.encounter,
+        difficulties = { d }, resetType = ctx.isRaid and "weekly" or "daily",
+      } },
+    }
+    if kind == "mount" then target.mountID = extra elseif kind == "pet" then target.speciesID = extra end
+    self.db.targets[id] = target
+  end
+  if target.kind == "transmog" and ctx.link then
+    local _, sourceID = RR.Call("C_TransmogCollection.GetItemInfo", ctx.link)
+    if sourceID then
+      target.sourceByDiff = target.sourceByDiff or {}
+      target.sourceByDiff[d] = sourceID
+    end
+  end
+  itemName(target)
+  self:UpdateCollected()
+  RR:RefreshUI()
+  return true
+end
+
+local WANT_STATE = { chance = "open", locked = "done" }
+
+-- Checklist rows: one per wanted item. Open = boss still available this reset, done = already killed.
+function M:GetChecklistRows()
+  local wants = {}
+  for _, target in pairs(self.db.targets) do
+    if target.want then wants[#wants + 1] = target end
+  end
+  if #wants == 0 then return nil end
+  table.sort(wants, function(a, b) return itemName(a) < itemName(b) end)
+  local rows = { { label = L.WANT_HEADER, header = true } }
+  for _, target in ipairs(wants) do
+    local collected = self.db.collected[target.id]
+    if not (collected and self.db.collectedMode == "hide") then
+      rows[#rows + 1] = {
+        path = "want:" .. target.id,
+        label = itemName(target) .. "  |cff808080" .. self:SourceText(target.sources[1]) .. "|r",
+        icon = itemIcon(target), dim = collected,
+        tooltip = self:TargetTooltip(target),
+        onRightClick = function(owner)
+          RR.ShowMenu(owner, {
+            { text = itemName(target), isTitle = true },
+            { text = L.WANT_REMOVE, func = function() M:RemoveTarget(target.id) end },
+          })
+        end,
+        cell = function(charKey)
+          if collected then return RR.FormatState("done", L.FARM_COLLECTED_SHORT) end
+          local status = M:Status(charKey, target)
+          local state = WANT_STATE[status]
+          if not state then return RR.FormatState("na", status == "unknown" and "?" or L.FARM_INELIGIBLE) end
+          return RR.FormatState(state, status == "chance" and L.FARM_CHANCE or L.FARM_LOCKED), M:TargetTooltip(target)
+        end,
+      }
+    end
+  end
+  return rows
+end
+
+function M:AddSummaryEntries(charKey, count)
+  for _, target in pairs(self.db.targets) do
+    if target.want and not self.db.collected[target.id] then
+      local state = WANT_STATE[self:Status(charKey, target)]
+      if state then count("want:" .. target.id, target.sources[1].resetType or "weekly", state, itemName(target)) end
+    end
+  end
 end
 
 -- Own targets plus the boss-drop mounts found by the Collections module. An auto target replaces a starter entry

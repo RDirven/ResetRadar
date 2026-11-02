@@ -18,7 +18,7 @@ local function newObj(kind)
       IsShown = function(self) return self._shown end, IsVisible = function(self) return self._shown end,
       SetText = function(self, s) self._text = s end, GetText = function(self) return self._text end,
       GetStringWidth = function() return 50 end, GetStringHeight = function() return 12 end,
-      GetPoint = function() return "CENTER", nil, "CENTER", 0, 0 end,
+      GetPoint = function() return "CENTER", nil, "CENTER", 0, 0 end, GetFrameLevel = function() return 1 end,
       SetChecked = function(self, v) self._checked = v end, GetChecked = function(self) return self._checked end,
       SetEnabled = function(self, v) self._enabled = v end, IsEnabled = function(self) return self._enabled end,
       GetVerticalScroll = function() return 0 end, HasFocus = function() return false end,
@@ -28,6 +28,7 @@ local function newObj(kind)
       Click = function(self) if self._scripts.OnClick then self._scripts.OnClick(self, "LeftButton") end end,
       RegisterEvent = function(self, e) if e == "BOGUS_EVENT" then error("unknown event") end end,
     }
+    if type(k) == "string" and k:find("^ResetRadar") then return nil end
     return impl[k] or function() end
   end })
 end

@@ -79,6 +79,11 @@ Module **Collections** (standaard aan), tabblad **Transmog**:
 - Filters: raids, dungeons of alles, sorteren op expansie of op meeste missende items, complete raids verbergen. Optie "completionist" telt elk item-source in plaats van unieke appearances.
 - **Ontbrekende mounts automatisch:** elke boss-drop mount uit de journal die je nog niet hebt, komt vanzelf in Farm Targets (gemarkeerd als *auto*), met de juiste boss en moeilijkheden. Rechtsklik verbergt er één. Een auto-target vervangt de starterregel voor hetzelfde item.
 
+**In de Adventure Guide zelf** (uit te zetten in de instellingen):
+- Elke lootregel krijgt een **ster (Want)**. Klik erop en het item komt voor de gekozen moeilijkheid in de checklist onder *Wanted loot*, met per karakter of die boss deze reset nog te doen is (*Chance*) of al gedood is (*Locked*). Nog een keer klikken haalt hem weg. Telt mee in de samenvatting (minimap/login) zolang het item niet verzameld is.
+- Een **vinkje** op het icoon als de appearance (of mount) al verzameld is op je account.
+- Een **balk onder de Adventure Guide** met per moeilijkheid hoeveel appearances je in die instance nog mist (huidige moeilijkheid tussen [ ]), plus de geselecteerde boss.
+
 Beperkingen: alleen loot die de journal als bossdrop toont. Mounts van rare spawns, reputatie of achievements, en tier-stukken die uit tokens komen, worden niet gevonden. "Mist" geldt voor je hele account.
 
 ## Gebruikte API's en events

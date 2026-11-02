@@ -13,7 +13,8 @@ local M = {
   title = L.COLL_TITLE,
   description = L.COLL_DESC,
   defaultEnabled = true,
-  events = { "TRANSMOG_COLLECTION_UPDATED", "NEW_MOUNT_ADDED", "PLAYER_REGEN_ENABLED" },
+  events = { "TRANSMOG_COLLECTION_UPDATED", "NEW_MOUNT_ADDED", "PLAYER_REGEN_ENABLED", "ADDON_LOADED",
+    "EJ_DIFFICULTY_UPDATE", "EJ_LOOT_DATA_RECIEVED" },
   defaults = {
     autoMounts = true,
     includeDungeons = true,
@@ -23,6 +24,7 @@ local M = {
     sortBy = "tier",          -- "tier" | "missing"
     expanded = {},
     hiddenAutoMounts = {},
+    journalOverlay = true,    -- Want star, collected mark and missing counts in the Adventure Guide
   },
 }
 
@@ -383,6 +385,201 @@ function M:HideAutoMount(mountID)
   RR:RefreshUI()
 end
 
+-- ---------- Adventure Guide overlay ----------
+-- Decorates the loot list of Blizzard's Adventure Guide (loaded on demand) via ScrollUtil callbacks, which only add
+-- our own child frames: a Want star (adds the item for the selected difficulty to the checklist) and a collected
+-- mark. A small bar under the guide shows missing appearances per difficulty from the journal scan.
+
+local overlay = {}
+local STAR_ON, STAR_OFF = "auctionhouse-icon-favorite", "auctionhouse-icon-favorite-off"
+
+local function setAtlasOr(texture, atlas, fallback)
+  if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) then
+    texture:SetAtlas(atlas)
+  else
+    texture:SetTexture(fallback)
+  end
+end
+
+local function journalContext()
+  local jid = EncounterJournal and EncounterJournal.instanceID
+  if not jid then return nil end
+  local name, _, _, _, _, _, _, _, _, mapID = EJ_GetInstanceInfo(jid)
+  return {
+    jid = jid, instance = name, mapID = mapID, difficulty = EJ_GetDifficulty and EJ_GetDifficulty(),
+    isRaid = EJ_InstanceIsRaid and EJ_InstanceIsRaid() or false, encounterID = EncounterJournal.encounterID,
+  }
+end
+
+local function lootInfo(frame, elementData)
+  local index = (type(elementData) == "table" and elementData.index) or frame.index
+  local info = index and RR.Call("C_EncounterJournal.GetLootInfoByIndex", index)
+  if info and info.itemID then return info end
+  if frame.itemID then return { itemID = frame.itemID, link = frame.link, encounterID = frame.encounterID } end
+end
+
+-- true / false / nil (nil = not a collectible)
+local function lootCollected(info)
+  local mountID = RR.Call("C_MountJournal.GetMountFromItem", info.itemID)
+  if mountID and mountID > 0 then
+    return select(11, RR.Call("C_MountJournal.GetMountInfoByID", mountID)) and true or false
+  end
+  if not info.link then return nil end
+  local _, sourceID = RR.Call("C_TransmogCollection.GetItemInfo", info.link)
+  if not sourceID then return nil end
+  return (isCollected(sourceID))
+end
+
+local function decorate(frame, elementData)
+  if type(frame) ~= "table" or not frame.CreateTexture then return end
+  local deco = frame.ResetRadarDeco
+  if not deco then
+    deco = {}
+    local anchor = frame.icon or frame.Icon or frame
+    deco.star = CreateFrame("Button", nil, frame)
+    deco.star:SetSize(16, 16)
+    deco.star:SetPoint("TOPLEFT", anchor, "TOPLEFT", -4, 4)
+    deco.star:SetFrameLevel(frame:GetFrameLevel() + 5)
+    deco.star.tex = deco.star:CreateTexture(nil, "OVERLAY")
+    deco.star.tex:SetAllPoints()
+    deco.check = frame:CreateTexture(nil, "OVERLAY", nil, 7)
+    deco.check:SetSize(14, 14)
+    deco.check:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", 3, -3)
+    setAtlasOr(deco.check, "common-icon-checkmark", "Interface\\RaidFrame\\ReadyCheck-Ready")
+    deco.star:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:AddLine(L.ADDON_TITLE)
+      GameTooltip:AddLine(self.wanted and L.WANT_TIP_ON or L.WANT_TIP_OFF, 1, 1, 1, true)
+      GameTooltip:Show()
+    end)
+    deco.star:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    deco.star:SetScript("OnClick", function(self)
+      local farm = RR.modules.FarmTargets
+      local ctx = journalContext()
+      if not self.info or not ctx or not ctx.difficulty or not farm or not RR:IsModuleActive("FarmTargets") then
+        RR.Print(L.WANT_NEED_FARM)
+        return
+      end
+      ctx.itemID, ctx.link = self.info.itemID, self.info.link
+      ctx.encounter = self.info.encounterID and EJ_GetEncounterInfo and EJ_GetEncounterInfo(self.info.encounterID) or nil
+      local added = farm:ToggleWant(ctx)
+      local name = C_Item.GetItemInfo(ctx.itemID) or ("item:" .. ctx.itemID)
+      RR.Print(string.format(added and L.WANT_ADDED or L.WANT_REMOVED, name))
+      M:RefreshJournal()
+    end)
+    frame.ResetRadarDeco = deco
+  end
+  local info = M.active and M.db.journalOverlay and lootInfo(frame, elementData)
+  if not info then
+    deco.star:Hide()
+    deco.check:Hide()
+    return
+  end
+  local ctx = journalContext()
+  local farm = RR.modules.FarmTargets
+  local wanted = ctx and farm and RR:IsModuleActive("FarmTargets") and farm:IsWanted(info.itemID, ctx.difficulty) or false
+  deco.star.info, deco.star.wanted = info, wanted
+  setAtlasOr(deco.star.tex, wanted and STAR_ON or STAR_OFF, "Interface\\Common\\FavoritesIcon")
+  deco.star.tex:SetDesaturated(not wanted)
+  deco.star:SetAlpha(wanted and 1 or 0.45)
+  deco.star:Show()
+  deco.check:SetShown(lootCollected(info) == true)
+end
+
+-- Text for the bar: missing per difficulty for the open instance, current difficulty highlighted.
+function M:JournalSummaryText()
+  local ctx = journalContext()
+  if not ctx then return nil end
+  local journal = self.db.journal
+  if not journal then return L.EJ_BAR_NO_SCAN end
+  local rows = journal.instances[ctx.jid] and self:Summary()[ctx.jid]
+  if not rows or not next(rows) then return L.EJ_BAR_NONE end
+  local diffs = {}
+  for d in pairs(rows) do diffs[#diffs + 1] = d end
+  table.sort(diffs, function(a, b) return (DIFF_ORDER[a] or 99) < (DIFF_ORDER[b] or 99) end)
+  local parts = {}
+  for _, d in ipairs(diffs) do
+    local row = rows[d]
+    local color = row.missing == 0 and "|cff40ff40" or "|cffff8080"
+    local part = string.format("%s %s%d/%d|r", difficultyName(d), color, row.missing, row.total)
+    if d == ctx.difficulty then part = "|cffffd100[|r" .. part .. "|cffffd100]|r" end
+    parts[#parts + 1] = part
+  end
+  local text = L.EJ_BAR_MISSING .. " " .. table.concat(parts, "  ")
+  local current = ctx.difficulty and rows[ctx.difficulty]
+  local boss = current and ctx.encounterID and current.bosses[ctx.encounterID]
+  if boss then text = text .. "   " .. string.format(L.EJ_BAR_BOSS, boss.name or "?", boss.missing, boss.total) end
+  return text
+end
+
+function M:RefreshJournal()
+  if not overlay.hooked or not EncounterJournal or not EncounterJournal:IsShown() then return end
+  if overlay.scrollBox and overlay.scrollBox.ForEachFrame then
+    pcall(overlay.scrollBox.ForEachFrame, overlay.scrollBox, function(frame, elementData)
+      RR.SafeCall("journal decorate", decorate, frame, elementData)
+    end)
+  end
+  local bar = overlay.bar
+  if bar then
+    local text = self.active and self.db.journalOverlay and self:JournalSummaryText()
+    if text then
+      bar.text:SetText(text)
+      bar:Show()
+    else
+      bar:Hide()
+    end
+  end
+end
+
+local refreshPending
+local function refreshSoon()
+  if refreshPending then return end
+  refreshPending = true
+  C_Timer.After(0.1, function()
+    refreshPending = false
+    RR.SafeCall("journal refresh", M.RefreshJournal, M)
+  end)
+end
+
+function M:HookJournal()
+  if overlay.hooked then return end
+  local info = EncounterJournal and EncounterJournal.encounter and EncounterJournal.encounter.info
+  local scrollBox = info and info.LootContainer and info.LootContainer.ScrollBox
+  if not scrollBox or not ScrollUtil then
+    RR.Debug("Adventure Guide loot list not found; overlay disabled")
+    return
+  end
+  overlay.hooked = true
+  overlay.scrollBox = scrollBox
+  local function onFrame(a, b, c)
+    -- ScrollUtil passes (frame, elementData); a raw callback passes (owner, frame, elementData)
+    local frame, elementData = a, b
+    if type(a) ~= "table" or not a.GetObjectType then frame, elementData = b, c end
+    RR.SafeCall("journal decorate", decorate, frame, elementData)
+    refreshSoon()
+  end
+  if ScrollUtil.AddInitializedFrameCallback then
+    ScrollUtil.AddInitializedFrameCallback(scrollBox, onFrame, M, true)
+  elseif ScrollUtil.AddAcquiredFrameCallback then
+    ScrollUtil.AddAcquiredFrameCallback(scrollBox, onFrame, M, true)
+  end
+
+  local bar = CreateFrame("Frame", nil, EncounterJournal, "BackdropTemplate")
+  RR.CreateBackdrop(bar, 0.92)
+  bar:SetPoint("TOPLEFT", EncounterJournal, "BOTTOMLEFT", 0, -2)
+  bar:SetPoint("TOPRIGHT", EncounterJournal, "BOTTOMRIGHT", 0, -2)
+  bar:SetHeight(22)
+  bar.text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  bar.text:SetPoint("LEFT", 8, 0)
+  bar.text:SetPoint("RIGHT", -8, 0)
+  bar.text:SetJustifyH("LEFT")
+  bar.text:SetWordWrap(false)
+  bar:Hide()
+  overlay.bar = bar
+  EncounterJournal:HookScript("OnShow", refreshSoon)
+  refreshSoon()
+end
+
 -- ---------- module hooks ----------
 
 function M:OnInitialize(db)
@@ -390,7 +587,14 @@ function M:OnInitialize(db)
 end
 
 local invalidateTimer
-function M:OnEvent(event)
+function M:OnEvent(event, arg1)
+  if event == "ADDON_LOADED" then
+    if arg1 == "Blizzard_EncounterJournal" then RR.SafeCall("HookJournal", M.HookJournal, M) end
+    return
+  elseif event == "EJ_DIFFICULTY_UPDATE" or event == "EJ_LOOT_DATA_RECIEVED" then
+    if not scanner then refreshSoon() end
+    return
+  end
   if event == "PLAYER_REGEN_ENABLED" and scanner and scanner.paused then
     local paused = scanner.paused
     scanner.paused = nil
@@ -402,12 +606,20 @@ function M:OnEvent(event)
       invalidateTimer = nil
       M:Invalidate()
       RR:RefreshUI()
+      refreshSoon()
     end)
+  end
+end
+
+function M:OnEnable()
+  if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
+    RR.SafeCall("HookJournal", M.HookJournal, M)
   end
 end
 
 function M:OnDisable()
   self:CancelScan()
+  if overlay.bar then overlay.bar:Hide() end
 end
 
 function M:AddMinimapLines(tt)
@@ -426,6 +638,8 @@ function M:BuildSettings(layout)
     function(v) db.autoMounts = v RR:RefreshUI() end)
   layout:AddCheck(L.COLL_OPT_DUNGEONS, L.COLL_OPT_DUNGEONS_TIP, function() return db.includeDungeons end,
     function(v) db.includeDungeons = v end)
+  layout:AddCheck(L.COLL_OPT_OVERLAY, L.COLL_OPT_OVERLAY_TIP, function() return db.journalOverlay end,
+    function(v) db.journalOverlay = v refreshSoon() end)
   layout:AddCheck(L.COLL_OPT_COMPLETIONIST, L.COLL_OPT_COMPLETIONIST_TIP, function() return db.completionist end,
     function(v) db.completionist = v M:Invalidate() RR:RefreshUI() end)
 end

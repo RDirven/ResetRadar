@@ -128,6 +128,51 @@ fire("PLAYER_REGEN_ENABLED")
 MOCK_RUN_TIMERS()
 assert(not coll:IsScanning(), "resumed and finished")
 
+-- adventure guide overlay + Want
+EJ_GetDifficulty = function() return 6 end
+EJ_InstanceIsRaid = function() return true end
+EJ_GetEncounterInfo = function(id) return id == 2 and "The Lich King" or "Lord Marrowgar" end
+MOCK_EJ_DIFF = 6
+local ejFrames = {}
+local sb = { ForEachFrame = function(self, fn) for _, f in ipairs(ejFrames) do fn(f.frame, f.data) end end }
+EncounterJournal = CreateFrame("Frame")
+EncounterJournal.instanceID, EncounterJournal.encounterID = 758, 2
+EncounterJournal.encounter = { info = { LootContainer = { ScrollBox = sb } } }
+ScrollUtil = { AddInitializedFrameCallback = function(box, cb, owner, iterate) MOCK_EJ_CB = cb end }
+fire("ADDON_LOADED", "Blizzard_EncounterJournal")
+assert(MOCK_EJ_CB, "journal hooked")
+local row = CreateFrame("Button"); row.icon = row:CreateTexture()
+ejFrames[1] = { frame = row, data = { index = 3 } }   -- item 2002, Lich King
+MOCK_EJ_CB(row, { index = 3 })
+local deco = row.ResetRadarDeco
+assert(deco and deco.star, "star added to loot row")
+assertEq(deco.star.wanted, false, "not wanted yet")
+deco.star._scripts.OnClick(deco.star)
+local want = farm:FindWant(2002)
+assert(want, "want target created")
+assertEq(want.sources[1].encounter, "The Lich King", "want boss")
+assertEq(want.sources[1].mapID, 631, "want map")
+assertEq(want.sources[1].difficulties[1], 6, "want difficulty")
+assert(farm:IsWanted(2002, 6), "is wanted")
+MOCK_RUN_TIMERS()
+-- checklist shows a Wanted loot row; summary counts it
+RR.db.settings.viewMode = "all"
+RR:ShowWindow("checklist")
+local rowsFound = farm:GetChecklistRows()
+assert(rowsFound and #rowsFound == 2, "header + want row")
+local text = rowsFound[2].cell(RR.charKey)
+assert(type(text) == "string", "cell renders")
+local bar = coll:JournalSummaryText()
+realPrint("bar", bar)
+assert(bar and bar:find("2/3"), "bar shows missing on 25H")
+-- collected: appearance of 2002 on diff 6 is source 20026
+MOCK_COLLECTED_SRC[20026] = true
+coll:Invalidate(); farm:UpdateCollected()
+assert(farm.db.collected[want.id], "want collected")
+-- toggle off again
+deco.star._scripts.OnClick(deco.star)
+assertEq(farm:FindWant(2002), nil, "want removed")
+
 -- loot manager is off by default
 assertEq(RR:IsModuleEnabled("LootManager"), false, "loot off by default")
 assertEq(RR.ui.tabs.loot.module, "LootManager")
