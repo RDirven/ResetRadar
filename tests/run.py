@@ -17,4 +17,11 @@ ns = lua.table()
 for f in toc:
     loader(open(base + "/" + f, encoding="utf-8").read(), f, ns)
 lua.execute(open(os.path.join(here, "scenario.lua"), encoding="utf-8").read())
+# German client: every German key must exist in English, and the overrides must apply
+de = lua.table()
+lua.execute("MOCK_LOCALE = 'deDE'")
+for f in ("Locales.lua", "Locales_deDE.lua"):
+    loader(open(base + "/" + f, encoding="utf-8").read(), f, de)
+assert de.L.DONE == "Fertig", de.L.DONE
+assert de.L.ADDON_TITLE == "ResetRadar"
 print("ALL OK")

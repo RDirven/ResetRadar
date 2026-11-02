@@ -173,6 +173,85 @@ assert(farm.db.collected[want.id], "want collected")
 deco.star._scripts.OnClick(deco.star)
 assertEq(farm:FindWant(2002), nil, "want removed")
 
+-- want everything from the Transmog tab (batch, sourceID instead of a link)
+local added = farm:AddWants({
+  { itemID = 2002, sourceID = 20026, difficulty = 6, mapID = 631, instance = "Icecrown Citadel", encounter = "The Lich King", isRaid = true },
+  { itemID = 2003, sourceID = 20036, difficulty = 6, mapID = 631, instance = "Icecrown Citadel", encounter = "The Lich King", isRaid = true },
+  { itemID = 2003, sourceID = 20036, difficulty = 6, mapID = 631, instance = "Icecrown Citadel", encounter = "The Lich King", isRaid = true },
+})
+assertEq(added, 2, "batch want, duplicate skipped")
+assertEq(farm:FindWant(2003).sourceByDiff[6], 20036, "sourceID stored")
+assertEq(farm:RemoveWants({ { itemID = 2002, difficulty = 6 }, { itemID = 2003, difficulty = 6 } }), 2, "batch remove")
+RR:ShowWindow("transmog")
+
+-- attempt counter: one per lockout
+local invTarget
+for _, t in ipairs(farm:AllTargets()) do if t.itemID == 50818 then invTarget = t end end
+assert(invTarget and not farm.db.collected[invTarget.id], "invincible target uncollected")
+fire("ENCOUNTER_END", 2, "The Lich King", 6, 25, 1)
+fire("ENCOUNTER_END", 2, "The Lich King", 6, 25, 1)
+fire("ENCOUNTER_END", 2, "The Lich King", 5, 10, 0) -- wipe: no attempt
+assertEq(farm:GetAttempts(50818), 1, "one attempt per lockout")
+fire("ENCOUNTER_END", 2, "The Lich King", 4, 25, 1) -- other difficulty: not a source
+assertEq(farm:GetAttempts(50818), 1, "wrong difficulty not counted")
+for k in pairs(farm.db.attemptSeen) do farm.db.attemptSeen[k] = time() - 1 end
+RR:ApplyResets()
+assertEq(next(farm.db.attemptSeen), nil, "attempt locks cleared at reset")
+fire("ENCOUNTER_END", 2, "The Lich King", 6, 25, 1)
+assertEq(farm:GetAttempts(50818), 2, "counted again after reset")
+RR:ShowWindow("mounts"); RR:ShowWindow("farm")
+-- drop alert (loot event + chat line for one drop = one alert)
+local before = #printed
+fire("ENCOUNTER_LOOT_RECEIVED", 2, 50818, "|Hitem:50818|h[x]|h", 1, "Tester")
+fire("CHAT_MSG_LOOT", "You receive loot: |Hitem:50818|h[x]|h", "Tester")
+local drops = 0
+for i = before + 1, #printed do if printed[i]:find("Dropped") then drops = drops + 1 end end
+assertEq(drops, 1, "one drop alert")
+assert(MOCK_SOUND, "alert sound played")
+-- collected alert after attempts
+local realMountInfo = C_MountJournal.GetMountInfoByID
+C_MountJournal.GetMountInfoByID = function() return "Invincible", 1, 1, false, true, 0, false, false, 0, false, true end
+farm:UpdateCollected() -- data change without a collect event: silent
+assertEq(farm.db.attempts[50818].gotAt, nil, "no alert without collect event")
+C_MountJournal.GetMountInfoByID = realMountInfo
+farm:UpdateCollected()
+C_MountJournal.GetMountInfoByID = function() return "Invincible", 1, 1, false, true, 0, false, false, 0, false, true end
+fire("NEW_MOUNT_ADDED")
+MOCK_RUN_TIMERS()
+assert(farm.db.attempts[50818].gotAt, "got after attempts recorded")
+assertEq(farm.db.attempts[50818].gotCount, 2, "got count")
+assert(printed[#printed]:find("Collected") and printed[#printed]:find("2"), "collected alert")
+C_MountJournal.GetMountInfoByID = realMountInfo
+farm:ResetAttempts(50818)
+assertEq(farm:GetAttempts(50818), 0, "attempts reset")
+farm:UpdateCollected()
+-- hide collected checkbox follows the setting
+farm.db.collectedMode = "hide"; RR:ShowWindow("farm"); RR:ShowWindow("mounts")
+farm.db.collectedMode = "show"
+
+-- weekly planner: current char has killed everything on diff 6, nothing on diff 5
+coll.db.plannerArmorOnly = false
+local plan = coll:PlannerEntries(RR.charKey)
+assert(plan and #plan == 1, "one instance/difficulty with open bosses")
+assertEq(plan[1].d, 5, "only the unlocked difficulty")
+assertEq(plan[1].items, 3, "three missing on 10H")
+coll.db.plannerArmorOnly = true -- mage, mock items are plate
+assertEq(#coll:PlannerEntries(RR.charKey), 0, "armor filter")
+coll.db.plannerArmorOnly = false
+assertEq(coll:PlannerEntries("Nobody-Silvermoon"), nil, "unknown char")
+RR:ShowWindow("planner")
+coll.db.plannerChar = "Oldalt-Silvermoon"; RR.ui:Refresh(); coll.db.plannerChar = nil
+
+-- tier sets: newest patch, raid difficulties only, per class
+local tier = coll:TierSets()
+assert(tier, "tier found")
+assertEq(tier.label, "Test Raid", "newest tier")
+assertEq(#tier.variants, 2, "normal + heroic, no pvp")
+assertEq(tier.variants[1], "Normal", "difficulty order")
+assertEq(#tier.classes.MAGE.Heroic.missing, 1, "one missing piece")
+assert(tier.classes.WARRIOR, "warrior set")
+RR:ShowWindow("tier")
+
 -- loot manager is off by default
 assertEq(RR:IsModuleEnabled("LootManager"), false, "loot off by default")
 assertEq(RR.ui.tabs.loot.module, "LootManager")

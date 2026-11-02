@@ -11,13 +11,19 @@
 - [ ] Interface-versie in de .toc nog actueel? (`/dump select(4, GetBuildInfo())`)
 - [ ] Loot Manager: verkopen via `C_Container.UseContainerItem` vanuit een timer werkt nog in 12.x (eerst alleen dry-run testen).
 - [ ] Concentration (`C_TradeSkillUI.GetChildProfessionInfo` / `GetConcentrationCurrencyID`) en de Great Vault World/Delves-rij werken in Midnight.
+- [ ] **Pogingenteller:** een kill op de juiste boss + moeilijkheid telt één poging (niet twee keer per lockout). Controleren dat `ENCOUNTER_END` de bossnaam geeft zoals in de journal (anders telt hij niet).
+- [ ] **Drop-melding:** `ENCOUNTER_LOOT_RECEIVED` / `CHAT_MSG_LOOT` in Midnight-instances (kunnen secret zijn; dan blijft de melding weg).
+- [ ] **Gesammelt-melding:** alleen na `NEW_MOUNT_ADDED` / `TRANSMOG_COLLECTION_SOURCE_ADDED` e.d., nooit bij inloggen.
+- [ ] **Tier-sets:** `C_TransmogSets.GetAllSets` levert class-sets met `description` = moeilijkheid (Raid Finder/Normal/Heroic/Mythic) en `patchID`; het juiste tier wordt gekozen en PvP-sets vallen weg.
+- [ ] **Planner:** aantallen kloppen met de Transmog-tab; "Alleen eigen armortype" klopt voor jouw klassen.
+- [ ] **Duitse client:** teksten passen in knoppen/kolommen (sommige zijn langer).
 - [ ] Als alles werkt: `v1.1.0` als gewone release taggen.
 
 ## Ideeën
 
-- [ ] **Pogingenteller per mount** (zoals Rarity): "Invincible: 37 kills", automatisch geteld bij elke kill op de juiste moeilijkheid.
-- [ ] **Melding bij een gewild item:** geluid/balk als een Want-item dropt of verzameld wordt.
-- [ ] **Weekplanner:** "deze week nog te doen" per alt, gesorteerd op welke raid de meeste missende items oplevert voor de bosses die nog open staan.
-- [ ] **Tier-sets per class:** hoeveel stukken van de huidige tier je per alt nog mist en uit welke moeilijkheid.
-- [ ] **Want vanuit de Transmog-tab:** rechtsklik op een boss of raid ("alles van deze boss willen").
-- [ ] **Duitse vertaling** van de interface (`Locales.lua`, `GetLocale() == "deDE"`).
+- [x] **Pogingenteller per mount** (zoals Rarity): "Invincible: 37 kills", automatisch geteld bij elke kill op de juiste moeilijkheid.
+- [x] **Melding bij een gewild item:** geluid/balk als een Want-item dropt of verzameld wordt.
+- [x] **Weekplanner:** "deze week nog te doen" per alt, gesorteerd op welke raid de meeste missende items oplevert voor de bosses die nog open staan.
+- [x] **Tier-sets per class:** hoeveel stukken van de huidige tier je per alt nog mist en uit welke moeilijkheid.
+- [x] **Want vanuit de Transmog-tab:** rechtsklik op een boss of raid ("alles van deze boss willen").
+- [x] **Duitse vertaling** van de interface (`Locales.lua`, `GetLocale() == "deDE"`).

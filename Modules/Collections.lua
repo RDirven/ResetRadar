@@ -25,6 +25,9 @@ local M = {
     expanded = {},
     hiddenAutoMounts = {},
     journalOverlay = true,    -- Want star, collected mark and missing counts in the Adventure Guide
+    plannerChar = nil,        -- character shown in the planner (nil = logged-in character)
+    plannerDungeons = false,
+    plannerArmorOnly = true,  -- only count armor the character's class can wear (plus cloaks/weapons/other)
   },
 }
 
@@ -262,8 +265,11 @@ end
 local summaryCache
 local collectedCache = {}
 
+local tierCache -- forward declaration; filled by M:TierSets below
+
 function M:Invalidate()
   summaryCache = nil
+  tierCache = nil
   wipe(collectedCache)
 end
 
@@ -341,11 +347,8 @@ function M:Summary()
   return summary
 end
 
--- For one character: bosses with missing loot that are still unlocked. Returns available, total (or nil if unknown).
-function M:CharAvailability(charKey, inst, d, row)
-  local char = RR.db.chars[charKey]
-  if not char then return nil end
-  local total, available = 0, 0
+-- The character's lockout for an instance + difficulty (by map ID, else by name), or nil.
+local function findLock(char, inst, d)
   local lock = char.lockouts and char.lockouts[tostring(inst.mapID) .. ":" .. tostring(d)]
   if not lock and inst.name then
     local wanted = inst.name:lower()
@@ -353,12 +356,24 @@ function M:CharAvailability(charKey, inst, d, row)
       if l.difficultyID == d and l.nameLower == wanted then lock = l break end
     end
   end
+  return lock
+end
+
+local function bossKilled(lock, bossName, now)
+  return lock and lock.expires and lock.expires > now and lock.killed[(bossName or ""):lower()] and true or false
+end
+
+-- For one character: bosses with missing loot that are still unlocked. Returns available, total (or nil if unknown).
+function M:CharAvailability(charKey, inst, d, row)
+  local char = RR.db.chars[charKey]
+  if not char then return nil end
+  local total, available = 0, 0
+  local lock = findLock(char, inst, d)
   local now = RR.Now()
   for _, boss in pairs(row.bosses) do
     if boss.missing > 0 then
       total = total + 1
-      local killed = lock and lock.expires and lock.expires > now and lock.killed[(boss.name or ""):lower()]
-      if not killed then available = available + 1 end
+      if not bossKilled(lock, boss.name, now) then available = available + 1 end
     end
   end
   if not char.lockoutsScanned then return nil, total end
@@ -383,6 +398,164 @@ end
 function M:HideAutoMount(mountID)
   self.db.hiddenAutoMounts[mountID] = true
   RR:RefreshUI()
+end
+
+-- ---------- Want from the Transmog tab ----------
+
+-- Want contexts for every missing item of the given bosses on one difficulty.
+local function wantContexts(inst, d, bosses)
+  local list = {}
+  for _, boss in ipairs(bosses) do
+    for _, item in ipairs(boss.items or {}) do
+      list[#list + 1] = {
+        itemID = item.itemID, sourceID = item.sourceID, difficulty = d, mapID = inst.mapID, instance = inst.name,
+        encounter = boss.name, isRaid = inst.isRaid,
+      }
+    end
+  end
+  return list
+end
+
+local function wantMenu(owner, title, inst, d, bosses)
+  local farm = RR.modules.FarmTargets
+  if not farm or not RR:IsModuleActive("FarmTargets") then RR.Print(L.WANT_NEED_FARM) return end
+  local list = wantContexts(inst, d, bosses)
+  RR.ShowMenu(owner, {
+    { text = title, isTitle = true },
+    { text = string.format(L.WANT_ALL, #list), disabled = #list == 0, func = function()
+      RR.Print(string.format(L.WANT_ALL_DONE, farm:AddWants(list), title))
+    end },
+    { text = L.WANT_NONE, disabled = #list == 0, func = function()
+      RR.Print(string.format(L.WANT_NONE_DONE, farm:RemoveWants(list), title))
+    end },
+  })
+end
+
+-- ---------- weekly planner ----------
+
+local CLASS_ARMOR = {
+  WARRIOR = 4, PALADIN = 4, DEATHKNIGHT = 4, HUNTER = 3, SHAMAN = 3, EVOKER = 3,
+  ROGUE = 2, DRUID = 2, MONK = 2, DEMONHUNTER = 2, MAGE = 1, PRIEST = 1, WARLOCK = 1,
+}
+
+-- For one character: per instance and difficulty, the missing appearances on bosses that are still unlocked this
+-- reset, most first. Returns nil when the journal was never scanned or the character's lockouts are unknown.
+function M:PlannerEntries(charKey)
+  local char = RR.db.chars[charKey]
+  local journal = self.db.journal
+  if not char or not journal or not char.lockoutsScanned then return nil end
+  local armor = self.db.plannerArmorOnly and CLASS_ARMOR[char.class or ""]
+  local summary = self:Summary()
+  local now = RR.Now()
+  local entries = {}
+  for jid, inst in pairs(journal.instances) do
+    if inst.isRaid or self.db.plannerDungeons then
+      for d, row in pairs(summary[jid] or {}) do
+        if row.missing > 0 then
+          local lock = findLock(char, inst, d)
+          local e = { jid = jid, inst = inst, d = d, items = 0, open = 0, total = 0, bosses = {} }
+          for _, boss in pairs(row.bosses) do
+            local usable = {}
+            for _, item in ipairs(boss.items) do
+              if not armor or item.armor == 0 or item.armor == armor then usable[#usable + 1] = item end
+            end
+            if #usable > 0 then
+              e.total = e.total + 1
+              if not bossKilled(lock, boss.name, now) then
+                e.open = e.open + 1
+                e.items = e.items + #usable
+                e.bosses[#e.bosses + 1] = { name = boss.name, items = usable }
+              end
+            end
+          end
+          if e.items > 0 then
+            table.sort(e.bosses, function(a, b) return #a.items > #b.items end)
+            entries[#entries + 1] = e
+          end
+        end
+      end
+    end
+  end
+  table.sort(entries, function(a, b)
+    if a.items ~= b.items then return a.items > b.items end
+    if a.inst.tier ~= b.inst.tier then return a.inst.tier > b.inst.tier end
+    return a.inst.name < b.inst.name
+  end)
+  return entries
+end
+
+-- ---------- tier sets ----------
+-- Class sets of the current expansion whose variant label is a raid difficulty (so PvP sets are left out); the
+-- newest patch wins. Collected status comes from C_TransmogSets and is account-wide per class.
+
+local CLASS_IDS = {
+  WARRIOR = 1, PALADIN = 2, HUNTER = 3, ROGUE = 4, PRIEST = 5, DEATHKNIGHT = 6, SHAMAN = 7, MAGE = 8,
+  WARLOCK = 9, MONK = 10, DRUID = 11, DEMONHUNTER = 12, EVOKER = 13,
+}
+
+local function difficultyLabels()
+  local order = {}
+  for i, key in ipairs({ "PLAYER_DIFFICULTY3", "PLAYER_DIFFICULTY1", "PLAYER_DIFFICULTY2", "PLAYER_DIFFICULTY6" }) do
+    local text = _G[key]
+    if type(text) == "string" then order[text] = i end
+  end
+  if not next(order) then order = { ["Raid Finder"] = 1, ["Normal"] = 2, ["Heroic"] = 3, ["Mythic"] = 4 } end
+  return order
+end
+
+local function classOfMask(mask)
+  if type(mask) ~= "number" or mask <= 0 then return nil end
+  for classFile, id in pairs(CLASS_IDS) do
+    if mask == 2 ^ (id - 1) then return classFile end
+  end
+end
+
+local function appearanceName(appearanceID)
+  local sources = RR.Call("C_TransmogCollection.GetAllAppearanceSources", appearanceID)
+  local sourceID = type(sources) == "table" and sources[1]
+  local info = sourceID and RR.Call("C_TransmogCollection.GetSourceInfo", sourceID)
+  return info and info.name
+end
+
+-- Returns { label, variants = { "Normal", ... }, classes = { [classFile] = { [variant] = { total, missing = { names } } } } }
+-- or nil when the API is missing or no tier set was found.
+function M:TierSets()
+  if tierCache ~= nil then return tierCache or nil end
+  tierCache = false
+  local sets = RR.Call("C_TransmogSets.GetAllSets")
+  if type(sets) ~= "table" then return nil end
+  local expansion = (GetExpansionLevel and GetExpansionLevel()) or LE_EXPANSION_LEVEL_CURRENT
+  local diffOrder = difficultyLabels()
+  local best, bestPatch = {}, -1
+  for _, set in ipairs(sets) do
+    local classFile = classOfMask(set.classMask)
+    if classFile and set.expansionID == expansion and diffOrder[set.description or ""] then
+      local patch = set.patchID or 0
+      if patch > bestPatch then best, bestPatch = {}, patch end
+      if patch == bestPatch then best[#best + 1] = { set = set, classFile = classFile } end
+    end
+  end
+  if #best == 0 then return nil end
+  local result = { label = best[1].set.label or best[1].set.name, variants = {}, classes = {} }
+  local seenVariant = {}
+  for _, entry in ipairs(best) do
+    local set, variant = entry.set, entry.set.description
+    if not seenVariant[variant] then
+      seenVariant[variant] = true
+      result.variants[#result.variants + 1] = variant
+    end
+    local appearances = RR.Call("C_TransmogSets.GetSetPrimaryAppearances", set.setID) or {}
+    local cell = { total = 0, missing = {} }
+    for _, a in ipairs(appearances) do
+      cell.total = cell.total + 1
+      if not a.collected then cell.missing[#cell.missing + 1] = appearanceName(a.appearanceID) or ("#" .. tostring(a.appearanceID)) end
+    end
+    result.classes[entry.classFile] = result.classes[entry.classFile] or {}
+    result.classes[entry.classFile][variant] = cell
+  end
+  table.sort(result.variants, function(a, b) return (diffOrder[a] or 9) < (diffOrder[b] or 9) end)
+  tierCache = result
+  return result
 end
 
 -- ---------- Adventure Guide overlay ----------
@@ -779,6 +952,11 @@ local function buildTransmogTab(parent)
           db.expanded[key] = not expanded or nil
           tab:Refresh()
         end,
+        onRightClick = function(owner)
+          local all = {}
+          for _, boss in pairs(row.bosses) do all[#all + 1] = boss end
+          wantMenu(owner, e.inst.name .. " - " .. difficultyName(e.d), e.inst, e.d, all)
+        end,
         cell = function(colKey)
           if colKey == "_missing" then
             local state = row.missing == 0 and "done" or "open"
@@ -797,6 +975,9 @@ local function buildTransmogTab(parent)
             rows[#rows + 1] = {
               label = "      " .. (boss.name or "?"),
               tooltip = missingTooltip(boss.name or "?", boss.items),
+              onRightClick = function(owner)
+                wantMenu(owner, (boss.name or "?") .. " - " .. difficultyName(e.d), e.inst, e.d, { boss })
+              end,
               cell = function(colKey)
                 if colKey == "_missing" then
                   return RR.FormatState(boss.missing == 0 and "done" or "open",
@@ -821,8 +1002,194 @@ local function buildTransmogTab(parent)
   return tab
 end
 
+-- ---------- UI: Planner tab ----------
+
+local function plannerCharKey()
+  local key = M.db.plannerChar
+  if key and RR.db.chars[key] then return key end
+  return RR.charKey
+end
+
+local function buildPlannerTab(parent)
+  local tab = {}
+  local db = M.db
+
+  local charBtn = RR.CreateButton(parent, "", 170, function(self)
+    local items = { { text = L.PLAN_PICK_CHAR, isTitle = true } }
+    for key, char in pairs(RR.db.chars) do
+      if not char.hidden then
+        items[#items + 1] = { key = key, text = RR:CharDisplayName(key), func = function()
+          db.plannerChar = key ~= RR.charKey and key or nil
+          tab:Refresh()
+        end }
+      end
+    end
+    table.sort(items, function(a, b)
+      if not a.key or not b.key then return not a.key end
+      return a.key < b.key
+    end)
+    RR.ShowMenu(self, items)
+  end)
+  charBtn:SetPoint("TOPLEFT", 4, -4)
+  local dungeonCheck = RR.CreateCheck(parent, L.PLAN_DUNGEONS, function(v) db.plannerDungeons = v tab:Refresh() end)
+  dungeonCheck:SetPoint("LEFT", charBtn, "RIGHT", 8, 0)
+  local armorCheck = RR.CreateCheck(parent, L.PLAN_ARMOR_ONLY, function(v) db.plannerArmorOnly = v tab:Refresh() end)
+  armorCheck:SetPoint("LEFT", dungeonCheck, "RIGHT", 120, 0)
+  local status = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  status:SetPoint("TOPLEFT", 4, -30)
+  status:SetPoint("RIGHT", -4, 0)
+  status:SetJustifyH("LEFT")
+  status:SetWordWrap(false)
+
+  local holder = CreateFrame("Frame", nil, parent)
+  holder:SetPoint("TOPLEFT", 0, -46)
+  holder:SetPoint("BOTTOMRIGHT")
+  local grid = RR.CreateGrid(holder, 300)
+  local columns = {
+    { key = "items", label = L.PLAN_COL_ITEMS }, { key = "bosses", label = L.PLAN_COL_BOSSES },
+    { key = "wanted", label = L.PLAN_COL_WANTED },
+  }
+
+  -- Wanted items with a chance for this character in this instance + difficulty.
+  local function wantedCount(charKey, inst, d)
+    local farm = RR.modules.FarmTargets
+    if not farm or not RR:IsModuleActive("FarmTargets") then return 0 end
+    local n = 0
+    for _, target in pairs(farm.db.targets) do
+      local source = target.want and target.sources[1]
+      if source and not farm.db.collected[target.id]
+        and (source.mapID == inst.mapID or (source.instance and inst.name and source.instance:lower() == inst.name:lower())) then
+        for _, wd in ipairs(source.difficulties or {}) do
+          if wd == d and farm:Status(charKey, target) == "chance" then n = n + 1 break end
+        end
+      end
+    end
+    return n
+  end
+
+  local function bossTooltip(e)
+    return function(tt)
+      tt:AddLine(e.inst.name .. " - " .. difficultyName(e.d))
+      for _, boss in ipairs(e.bosses) do
+        tt:AddDoubleLine(boss.name or "?", string.format(L.PLAN_TIP_ITEMS, #boss.items), 1, 1, 1, 1, 0.5, 0.5)
+      end
+      tt:AddLine(L.PLAN_TIP_RCLICK, 0.5, 0.5, 0.5)
+    end
+  end
+
+  function tab:Refresh()
+    local charKey = plannerCharKey()
+    charBtn:SetLabel(charKey and RR:CharDisplayName(charKey) or "?")
+    dungeonCheck:SetChecked(db.plannerDungeons)
+    armorCheck:SetChecked(db.plannerArmorOnly)
+    local rows = {}
+    local entries = charKey and M:PlannerEntries(charKey)
+    if not db.journal then
+      status:SetText(L.COLL_NO_DATA)
+    elseif not entries then
+      status:SetText(L.PLAN_NO_LOCKOUTS)
+    else
+      local total = 0
+      for _, e in ipairs(entries) do total = total + e.items end
+      status:SetText(string.format(L.PLAN_STATUS, total, #entries, RR.FormatDuration((RR:GetNextReset("weekly") or RR.Now()) - RR.Now())))
+      for _, e in ipairs(entries) do
+        local wanted = wantedCount(charKey, e.inst, e.d)
+        rows[#rows + 1] = {
+          label = e.inst.name .. " |cff808080" .. difficultyName(e.d) .. "|r",
+          tooltip = bossTooltip(e),
+          onRightClick = function(owner)
+            wantMenu(owner, e.inst.name .. " - " .. difficultyName(e.d), e.inst, e.d, e.bosses)
+          end,
+          cell = function(colKey)
+            if colKey == "items" then return RR.FormatState("open", tostring(e.items)), bossTooltip(e) end
+            if colKey == "bosses" then
+              return RR.FormatState(e.open == e.total and "done" or "progress", string.format("%d/%d", e.open, e.total)),
+                bossTooltip(e)
+            end
+            return RR.FormatState(wanted > 0 and "done" or "na", wanted > 0 and tostring(wanted) or "-")
+          end,
+        }
+      end
+    end
+    if #rows == 0 then rows[1] = { label = entries and L.PLAN_NOTHING or L.COLL_NO_DATA_ROW } end
+    grid:SetData(columns, rows)
+    grid:Render()
+  end
+  return tab
+end
+
+-- ---------- UI: Tier sets tab ----------
+
+local function buildTierTab(parent)
+  local tab = {}
+  local status = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  status:SetPoint("TOPLEFT", 4, -8)
+  status:SetPoint("RIGHT", -4, 0)
+  status:SetJustifyH("LEFT")
+  status:SetWordWrap(false)
+  local holder = CreateFrame("Frame", nil, parent)
+  holder:SetPoint("TOPLEFT", 0, -26)
+  holder:SetPoint("BOTTOMRIGHT")
+  local grid = RR.CreateGrid(holder, 260)
+
+  function tab:Refresh()
+    local tier = M:TierSets()
+    if not tier then
+      status:SetText(L.TIER_NONE)
+      grid:SetData({}, { { label = L.TIER_NONE } })
+      grid:Render()
+      return
+    end
+    -- one row per class you have characters of
+    local byClass, classes = {}, {}
+    for key, char in pairs(RR.db.chars) do
+      if char.class and not char.hidden then
+        if not byClass[char.class] then
+          byClass[char.class] = {}
+          classes[#classes + 1] = char.class
+        end
+        table.insert(byClass[char.class], key)
+      end
+    end
+    table.sort(classes)
+    local columns = {}
+    for _, variant in ipairs(tier.variants) do columns[#columns + 1] = { key = variant, label = variant } end
+    local rows = {}
+    for _, classFile in ipairs(classes) do
+      local cells = tier.classes[classFile] or {}
+      local names = {}
+      for _, key in ipairs(byClass[classFile]) do names[#names + 1] = RR:CharDisplayName(key, true) end
+      local className = (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classFile]) or classFile
+      rows[#rows + 1] = {
+        label = RR.ClassColored(className, classFile) .. "  |cff808080" .. table.concat(names, ", ") .. "|r",
+        cell = function(variant)
+          local c = cells[variant]
+          if not c or c.total == 0 then return RR.FormatState("na", "-") end
+          local text = string.format("%d/%d", #c.missing, c.total)
+          local tip = function(tt)
+            tt:AddLine(string.format("%s - %s (%s)", tier.label or "?", className, variant))
+            if #c.missing == 0 then tt:AddLine(L.TIER_COMPLETE, 0.5, 1, 0.5) end
+            for _, name in ipairs(c.missing) do tt:AddLine(name, 1, 1, 1) end
+            tt:AddLine(string.format(L.TIER_TIP_SOURCE, variant), 0.5, 0.5, 0.5, true)
+          end
+          return RR.FormatState(#c.missing == 0 and "done" or "open", text), tip
+        end,
+      }
+    end
+    if #rows == 0 then rows[1] = { label = L.TIER_NONE } end
+    status:SetText(string.format(L.TIER_STATUS, tier.label or "?"))
+    grid:SetData(columns, rows)
+    grid:Render()
+  end
+  return tab
+end
+
 function M:GetTabs()
-  return { { key = "transmog", label = L.TAB_TRANSMOG, build = buildTransmogTab, order = 22 } }
+  return {
+    { key = "transmog", label = L.TAB_TRANSMOG, build = buildTransmogTab, order = 22 },
+    { key = "tier", label = L.TAB_TIER, build = buildTierTab, order = 23 },
+    { key = "planner", label = L.TAB_PLANNER, build = buildPlannerTab, order = 24 },
+  }
 end
 
 RR:RegisterModule("Collections", M)

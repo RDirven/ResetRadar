@@ -9,6 +9,7 @@
 ## IconTexture: Interface\Icons\INV_Misc_Note_02
 
 Locales.lua
+Locales_deDE.lua
 Core.lua
 Checklist.lua
 UI.lua

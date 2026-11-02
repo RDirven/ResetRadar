@@ -1,4 +1,4 @@
--- ResetRadar: all user-facing text. English only; add a locale by overriding keys after a GetLocale() check.
+-- ResetRadar: all user-facing text in English. Other locales (Locales_deDE.lua) override keys after a GetLocale() check.
 -- A missing key falls back to the key name, so a typo shows up in the UI instead of causing an error.
 
 local _, ns = ...
@@ -142,7 +142,7 @@ L.FARM_LOGIN = "This character still has a chance at: %s"
 L.FARM_OPT_HIDE_COLLECTED = "Hide collected targets (otherwise shown greyed out)"
 L.FARM_OPT_LOGIN = "Add farm targets to the login message"
 L.FARM_ADD_TARGET = "Add target..."
-L.FARM_NOTE = "Right-click a target to remove it. Hover for which characters still have a chance."
+L.FARM_NOTE = "Right-click a target to remove it or reset its attempts. Hover for which characters still have a chance."
 L.FARM_EMPTY = "No farm targets yet. Use 'Add target...'."
 L.FARM_REMOVE = "Remove target"
 L.FARM_ADDED = "Added %s."
@@ -244,7 +244,7 @@ L.COLL_CLOSE_EJ = "Close the Adventure Guide first; the scan uses the same journ
 L.COLL_UNKNOWN_BOSS = "Unknown boss"
 L.COLL_NO_DATA = "No journal data yet. Press 'Scan journal' once (and again after a patch)."
 L.COLL_NO_DATA_ROW = "Press 'Scan journal' to find missing appearances and mounts."
-L.COLL_STATUS = "%d appearances missing in this view. Scanned %s. Click a row for bosses; columns show unlocked bosses with missing loot."
+L.COLL_STATUS = "%d appearances missing in this view. Scanned %s. Click a row for bosses, right-click to Want everything; columns show unlocked bosses with missing loot."
 L.COLL_OUTDATED = "Scanned on an older game version: rescan."
 L.COLL_NOTHING_MISSING = "Nothing missing here."
 L.COLL_COL_MISSING = "Missing"
@@ -286,3 +286,46 @@ L.EJ_BAR_NO_SCAN = "ResetRadar: scan the journal once (/resetradar, Transmog tab
 L.EJ_BAR_NONE = "ResetRadar: no appearances found for this instance."
 L.COLL_OPT_OVERLAY = "Adventure Guide: Want star, collected mark and missing counts"
 L.COLL_OPT_OVERLAY_TIP = "Adds a star and a check mark to the loot list and a bar under the guide."
+
+-- attempts and alerts
+L.MOUNTS_COL_ATTEMPTS = "Attempts"
+L.ATTEMPTS_SHORT = "[%d att.]"
+L.ATTEMPTS_TIP = "Attempts: %d (last %s)"
+L.ATTEMPTS_GOT = "Collected after %d attempts."
+L.ATTEMPTS_RESET = "Reset attempt counter"
+L.ATTEMPT_COUNTED = "%s: attempt %d."
+L.ALERT_COLLECTED = "Collected: %s!"
+L.ALERT_AFTER_ATTEMPTS = "(after %d attempts)"
+L.ALERT_DROP = "Dropped: %s!"
+L.ALERT_DROP_BY = "Dropped: %s (%s)!"
+L.FARM_OPT_ALERTS = "Alert when a target drops or is collected"
+L.FARM_OPT_ALERTS_TIP = "Raid-warning text on screen for wanted items and farm targets you have not collected yet."
+L.FARM_OPT_ALERT_SOUND = "Play a sound with the alert"
+L.FARM_HIDE_COLLECTED = "Hide collected"
+
+-- want from the transmog tab
+L.WANT_ALL = "Want all %d missing items"
+L.WANT_ALL_DONE = "Want: %d items added for %s."
+L.WANT_NONE = "Remove these from wanted"
+L.WANT_NONE_DONE = "Want: %d items removed for %s."
+
+-- weekly planner
+L.TAB_PLANNER = "Planner"
+L.PLAN_PICK_CHAR = "Character"
+L.PLAN_DUNGEONS = "Dungeons too"
+L.PLAN_ARMOR_ONLY = "Only own armor type"
+L.PLAN_COL_ITEMS = "Appearances"
+L.PLAN_COL_BOSSES = "Open bosses"
+L.PLAN_COL_WANTED = "Wanted"
+L.PLAN_STATUS = "Still to get this week: %d missing appearances in %d instances (weekly reset in %s). Right-click to Want."
+L.PLAN_NO_LOCKOUTS = "Log in on this character once so its lockouts are known."
+L.PLAN_NOTHING = "Nothing left to get for this character this week."
+L.PLAN_TIP_ITEMS = "%d missing"
+L.PLAN_TIP_RCLICK = "Right-click: Want all of these"
+
+-- tier sets
+L.TAB_TIER = "Tier sets"
+L.TIER_STATUS = "Current tier: %s. Missing/total pieces per class and difficulty (account-wide)."
+L.TIER_NONE = "No tier sets found for the current expansion (C_TransmogSets not available or no class sets)."
+L.TIER_COMPLETE = "Complete."
+L.TIER_TIP_SOURCE = "Comes from the %s raid (usually via tier tokens or the Catalyst)."

@@ -10,7 +10,8 @@ local M = {
   title = L.FARM_TITLE,
   description = L.FARM_DESC,
   defaultEnabled = true,
-  events = { "NEW_MOUNT_ADDED", "NEW_PET_ADDED", "NEW_TOY_ADDED", "TRANSMOG_COLLECTION_UPDATED", "GET_ITEM_INFO_RECEIVED" },
+  events = { "NEW_MOUNT_ADDED", "NEW_PET_ADDED", "NEW_TOY_ADDED", "TRANSMOG_COLLECTION_UPDATED", "GET_ITEM_INFO_RECEIVED",
+    "TRANSMOG_COLLECTION_SOURCE_ADDED", "ENCOUNTER_END", "ENCOUNTER_LOOT_RECEIVED", "CHAT_MSG_LOOT" },
   defaults = {
     targets = {},
     nextId = 1,
@@ -18,6 +19,10 @@ local M = {
     collectedMode = "show",   -- "show" (greyed, marked collected) | "hide"
     loginLine = true,
     collected = {},           -- target id -> true (account-wide cache)
+    attempts = {},            -- itemID -> { count, last, gotAt, gotCount } (account-wide, like Rarity)
+    attemptSeen = {},         -- "char:item:boss:difficulty" -> expires; one attempt per lockout
+    alerts = true,            -- raid-warning text when a target drops or gets collected
+    alertSound = true,
   },
 }
 
@@ -59,6 +64,13 @@ local function itemName(target)
     return name
   end
   return "item:" .. tostring(target.itemID)
+end
+
+-- " [12 att.]" after a target's name, or "" without attempts.
+local function attemptsSuffix(target)
+  local a = M.db.attempts[target.itemID]
+  if not a or a.count == 0 then return "" end
+  return " |cffb0b0ff" .. string.format(L.ATTEMPTS_SHORT, a.count) .. "|r"
 end
 
 local function itemIcon(target)
@@ -164,19 +176,37 @@ function M:IsWanted(itemID, difficulty)
   return false
 end
 
+function M:RemoveWant(itemID, d)
+  local target = self:FindWant(itemID)
+  if not target then return false end
+  local diffs = target.sources[1].difficulties
+  for i, existing in ipairs(diffs) do
+    if existing == d then
+      table.remove(diffs, i)
+      if target.sourceByDiff then target.sourceByDiff[d] = nil end
+      if #diffs == 0 then self:RemoveTarget(target.id) else RR:RefreshUI() end
+      return true
+    end
+  end
+  return false
+end
+
 function M:ToggleWant(ctx)
-  local target = self:FindWant(ctx.itemID)
+  if self:IsWanted(ctx.itemID, ctx.difficulty) then
+    self:RemoveWant(ctx.itemID, ctx.difficulty)
+    return false
+  end
+  return self:AddWant(ctx)
+end
+
+-- Adds one item for one difficulty (no-op when already wanted). ctx.sourceID may replace ctx.link (Transmog tab).
+-- silent = skip the collected update and refresh, for adding many items at once.
+function M:AddWant(ctx, silent)
   local d = ctx.difficulty
+  if self:IsWanted(ctx.itemID, d) then return false end
+  local target = self:FindWant(ctx.itemID)
   if target then
     local diffs = target.sources[1].difficulties
-    for i, existing in ipairs(diffs) do
-      if existing == d then
-        table.remove(diffs, i)
-        if target.sourceByDiff then target.sourceByDiff[d] = nil end
-        if #diffs == 0 then self:RemoveTarget(target.id) else RR:RefreshUI() end
-        return false
-      end
-    end
     diffs[#diffs + 1] = d
   else
     local kind, extra = detectKind(ctx.itemID)
@@ -192,17 +222,41 @@ function M:ToggleWant(ctx)
     if kind == "mount" then target.mountID = extra elseif kind == "pet" then target.speciesID = extra end
     self.db.targets[id] = target
   end
-  if target.kind == "transmog" and ctx.link then
-    local _, sourceID = RR.Call("C_TransmogCollection.GetItemInfo", ctx.link)
+  if target.kind == "transmog" then
+    local sourceID = ctx.sourceID
+    if not sourceID and ctx.link then sourceID = select(2, RR.Call("C_TransmogCollection.GetItemInfo", ctx.link)) end
     if sourceID then
       target.sourceByDiff = target.sourceByDiff or {}
       target.sourceByDiff[d] = sourceID
     end
   end
   itemName(target)
+  if not silent then
+    self:UpdateCollected()
+    RR:RefreshUI()
+  end
+  return true
+end
+
+-- Adds a batch of want contexts. Returns how many were new.
+function M:AddWants(list)
+  local added = 0
+  for _, ctx in ipairs(list) do
+    if self:AddWant(ctx, true) then added = added + 1 end
+  end
   self:UpdateCollected()
   RR:RefreshUI()
-  return true
+  return added
+end
+
+-- Removes a batch of { itemID, difficulty }. Returns how many were removed.
+function M:RemoveWants(list)
+  local removed = 0
+  for _, ctx in ipairs(list) do
+    if self:RemoveWant(ctx.itemID, ctx.difficulty) then removed = removed + 1 end
+  end
+  RR:RefreshUI()
+  return removed
 end
 
 local WANT_STATE = { chance = "open", locked = "done" }
@@ -221,7 +275,7 @@ function M:GetChecklistRows()
     if not (collected and self.db.collectedMode == "hide") then
       rows[#rows + 1] = {
         path = "want:" .. target.id,
-        label = itemName(target) .. "  |cff808080" .. self:SourceText(target.sources[1]) .. "|r",
+        label = itemName(target) .. attemptsSuffix(target) .. "  |cff808080" .. self:SourceText(target.sources[1]) .. "|r",
         icon = itemIcon(target), dim = collected,
         tooltip = self:TargetTooltip(target),
         onRightClick = function(owner)
@@ -271,7 +325,15 @@ function M:AllTargets()
   return list
 end
 
+-- Collected status per target id as last seen this session. Only an update that follows a real "something new
+-- was collected" event may alert on a false -> true change; collection data that finishes loading after login
+-- updates silently, so it never causes a false alert.
+local seenCollected = {}
+local collectEventPending = false
+
 function M:UpdateCollected()
+  local mayAlert = collectEventPending
+  collectEventPending = false
   for _, target in ipairs(self:AllTargets()) do
     local id = target.id
     if target.kind == nil or target.kind == "item" then
@@ -280,7 +342,100 @@ function M:UpdateCollected()
       if kind == "mount" then target.mountID = extra elseif kind == "pet" then target.speciesID = extra end
     end
     local collected = isCollected(target)
-    if collected ~= nil then self.db.collected[id] = collected or nil end
+    if collected ~= nil then
+      self.db.collected[id] = collected or nil
+      if collected and mayAlert and seenCollected[id] == false then self:OnTargetCollected(target) end
+      seenCollected[id] = collected
+    end
+  end
+end
+
+-- ---------- attempts and alerts ----------
+
+function M:Alert(text)
+  RR.Print(text)
+  if not self.db.alerts then return end
+  if RaidNotice_AddMessage and RaidWarningFrame then
+    local color = ChatTypeInfo and ChatTypeInfo.RAID_WARNING or { r = 1, g = 0.82, b = 0 }
+    pcall(RaidNotice_AddMessage, RaidWarningFrame, text, color)
+  end
+  if self.db.alertSound and PlaySound then
+    pcall(PlaySound, (SOUNDKIT and SOUNDKIT.RAID_WARNING) or 8959, "Master")
+  end
+end
+
+function M:OnTargetCollected(target)
+  local a = self.db.attempts[target.itemID]
+  if a and not a.gotAt then a.gotAt, a.gotCount = RR.Now(), a.count end
+  local text = string.format(L.ALERT_COLLECTED, itemName(target))
+  if a and a.count > 0 then text = text .. " " .. string.format(L.ALERT_AFTER_ATTEMPTS, a.count) end
+  self:Alert(text)
+end
+
+function M:GetAttempts(itemID)
+  local a = self.db.attempts[itemID]
+  return a and a.count or 0, a
+end
+
+function M:ResetAttempts(itemID)
+  self.db.attempts[itemID] = nil
+  RR:RefreshUI()
+end
+
+local function hasDifficulty(source, difficultyID)
+  for _, d in ipairs(source.difficulties or {}) do
+    if d == difficultyID then return true end
+  end
+  return false
+end
+
+-- A successful boss kill counts as one attempt for every uncollected target that drops from that boss on that
+-- difficulty, at most once per character per lockout (a second kill in the same reset cannot drop it again).
+function M:RecordKill(encounterName, difficultyID)
+  if type(encounterName) ~= "string" or RR.IsSecret(encounterName) or RR.IsSecret(difficultyID) then return end
+  local charKey = RR.charKey
+  if not charKey then return end
+  local boss = encounterName:lower()
+  local now = RR.Now()
+  local counted = {}
+  for _, target in ipairs(self:AllTargets()) do
+    if not self.db.collected[target.id] and not counted[target.itemID] then
+      for _, source in ipairs(target.sources or {}) do
+        if source.type == "lockout" and source.encounter and source.encounter:lower() == boss
+          and hasDifficulty(source, difficultyID) then
+          counted[target.itemID] = true
+          local seenKey = string.format("%s:%d:%s:%d", charKey, target.itemID, boss, difficultyID)
+          local seen = self.db.attemptSeen[seenKey]
+          if not seen or seen <= now then
+            self.db.attemptSeen[seenKey] = RR:GetNextReset(source.resetType or "weekly") or (now + 86400)
+            local a = self.db.attempts[target.itemID] or { count = 0 }
+            a.count, a.last = a.count + 1, now
+            self.db.attempts[target.itemID] = a
+            RR.Print(string.format(L.ATTEMPT_COUNTED, itemName(target), a.count))
+          end
+          break
+        end
+      end
+    end
+  end
+  RR:RefreshUI()
+end
+
+local recentDrops = {}
+
+-- An uncollected target showed up in loot (yours or a group member's).
+function M:CheckDrop(itemID, who)
+  itemID = tonumber(itemID)
+  if not itemID then return end
+  local now = RR.Now()
+  if recentDrops[itemID] and recentDrops[itemID] > now - 10 then return end -- loot event + chat line for one drop
+  for _, target in ipairs(self:AllTargets()) do
+    if target.itemID == itemID and not self.db.collected[target.id] then
+      recentDrops[itemID] = now
+      local name = itemName(target)
+      self:Alert(who and who ~= "" and string.format(L.ALERT_DROP_BY, name, who) or string.format(L.ALERT_DROP, name))
+      return
+    end
   end
 end
 
@@ -377,6 +532,12 @@ function M:TargetTooltip(target)
     local by = self:CharsByStatus(target)
     local total = #by.chance + #by.locked + #by.ineligible + #by.unknown
     if self.db.collected[target.id] then tt:AddLine(L.FARM_COLLECTED, 0.5, 1, 0.5) end
+    local count, a = self:GetAttempts(target.itemID)
+    if a and a.gotAt then
+      tt:AddLine(string.format(L.ATTEMPTS_GOT, a.gotCount or count), 0.5, 1, 0.5)
+    elseif count > 0 then
+      tt:AddLine(string.format(L.ATTEMPTS_TIP, count, RR.FormatAgo(a.last)), 0.7, 0.7, 1)
+    end
     if #by.chance > 0 then
       tt:AddLine(string.format(L.FARM_TIP_CHANCE, namesLine(by.chance), #by.chance, total), 1, 1, 1, true)
     end
@@ -437,6 +598,9 @@ function M:OnApplyResets(now)
       if q.expires and q.expires <= now then q.done, q.expires = false, nil end
     end
   end
+  for key, expires in pairs(self.db.attemptSeen) do
+    if expires <= now then self.db.attemptSeen[key] = nil end
+  end
 end
 
 function M:OnResetCharacter(_, char)
@@ -444,9 +608,27 @@ function M:OnResetCharacter(_, char)
 end
 
 local collectTimer
-function M:OnEvent(event)
+function M:OnEvent(event, ...)
+  if event == "ENCOUNTER_END" then
+    local _, encounterName, difficultyID, _, success = ...
+    if success == 1 then self:RecordKill(encounterName, difficultyID) end
+    return
+  elseif event == "ENCOUNTER_LOOT_RECEIVED" then
+    local _, itemID, _, _, playerName = ...
+    if not RR.IsSecret(itemID) and not RR.IsSecret(playerName) then self:CheckDrop(itemID, playerName) end
+    return
+  elseif event == "CHAT_MSG_LOOT" then
+    local text, playerName = ...
+    if type(text) ~= "string" or RR.IsSecret(text) or RR.IsSecret(playerName) then return end
+    for itemID in text:gmatch("item:(%d+)") do self:CheckDrop(itemID, playerName) end
+    return
+  end
+  if event == "NEW_MOUNT_ADDED" or event == "NEW_PET_ADDED" or event == "NEW_TOY_ADDED"
+    or event == "TRANSMOG_COLLECTION_SOURCE_ADDED" then
+    collectEventPending = true
+  end
   if event == "GET_ITEM_INFO_RECEIVED" or event == "NEW_MOUNT_ADDED" or event == "NEW_PET_ADDED"
-    or event == "NEW_TOY_ADDED" or event == "TRANSMOG_COLLECTION_UPDATED" then
+    or event == "NEW_TOY_ADDED" or event == "TRANSMOG_COLLECTION_UPDATED" or event == "TRANSMOG_COLLECTION_SOURCE_ADDED" then
     if collectTimer then return end
     collectTimer = C_Timer.NewTimer(RR.DEBOUNCE, function()
       collectTimer = nil
@@ -487,6 +669,16 @@ function M:BuildSettings(layout)
     RR:RefreshUI()
   end)
   layout:AddCheck(L.FARM_OPT_LOGIN, nil, function() return M.db.loginLine end, function(v) M.db.loginLine = v end)
+  layout:AddCheck(L.FARM_OPT_ALERTS, L.FARM_OPT_ALERTS_TIP, function() return M.db.alerts end,
+    function(v) M.db.alerts = v end)
+  layout:AddCheck(L.FARM_OPT_ALERT_SOUND, nil, function() return M.db.alertSound end,
+    function(v) M.db.alertSound = v end, 20)
+end
+
+local function setHideCollected(v)
+  M.db.collectedMode = v and "hide" or "show"
+  if RR.settingsLayout then RR.settingsLayout:Refresh() end
+  RR:RefreshUI()
 end
 
 -- ---------- UI: add form ----------
@@ -681,6 +873,7 @@ local function targetRow(target)
   if #target.sources > 1 then srcText = srcText .. string.format(" +%d", #target.sources - 1) end
   if collected then label = label .. " |cff40ff40(" .. L.FARM_COLLECTED_SHORT .. ")|r" end
   if target.auto then label = label .. " |cff8080ff(" .. L.FARM_AUTO .. ")|r" end
+  label = label .. attemptsSuffix(target)
   return {
     label = label .. "  |cff808080" .. srcText .. "|r",
     icon = itemIcon(target), dim = collected,
@@ -689,6 +882,8 @@ local function targetRow(target)
       RR.ShowMenu(owner, {
         { text = itemName(target), isTitle = true },
         { text = target.auto and L.FARM_HIDE_AUTO or L.FARM_REMOVE, func = function() M:RemoveTarget(target.id) end },
+        { text = L.ATTEMPTS_RESET, disabled = M:GetAttempts(target.itemID) == 0,
+          func = function() M:ResetAttempts(target.itemID) end },
       })
     end,
     cell = function(charKey)
@@ -707,8 +902,10 @@ local function buildFarmTab(parent)
     addForm:SetShown(not addForm:IsShown())
   end)
   addBtn:SetPoint("TOPLEFT", 4, -4)
+  local hideCheck = RR.CreateCheck(parent, L.FARM_HIDE_COLLECTED, setHideCollected)
+  hideCheck:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
   local note = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  note:SetPoint("LEFT", addBtn, "RIGHT", 10, 0)
+  note:SetPoint("LEFT", hideCheck, "RIGHT", 110, 0)
   note:SetPoint("RIGHT", -4, 0)
   note:SetJustifyH("LEFT")
   note:SetText(L.FARM_NOTE)
@@ -719,6 +916,7 @@ local function buildFarmTab(parent)
   local grid = RR.CreateGrid(holder, 300)
 
   function tab:Refresh()
+    hideCheck:SetChecked(M.db.collectedMode == "hide")
     local rows = {}
     for _, target in ipairs(M:ActiveTargets()) do rows[#rows + 1] = targetRow(target) end
     if #rows == 0 then rows[1] = { label = L.FARM_EMPTY } end
@@ -730,12 +928,16 @@ end
 
 local function buildMountTab(parent)
   local tab = {}
+  local hideCheck = RR.CreateCheck(parent, L.FARM_HIDE_COLLECTED, setHideCollected)
+  hideCheck:SetPoint("TOPLEFT", 4, -3)
   local holder = CreateFrame("Frame", nil, parent)
-  holder:SetAllPoints()
+  holder:SetPoint("TOPLEFT", 0, -30)
+  holder:SetPoint("BOTTOMRIGHT")
   local grid = RR.CreateGrid(holder, 320)
-  local columns = { { key = "count", label = L.MOUNTS_COL_CHANCES } }
+  local columns = { { key = "count", label = L.MOUNTS_COL_CHANCES }, { key = "attempts", label = L.MOUNTS_COL_ATTEMPTS } }
 
   function tab:Refresh()
+    hideCheck:SetChecked(M.db.collectedMode == "hide")
     local list = {}
     for _, target in ipairs(M:ActiveTargets("mount")) do
       local by = M:CharsByStatus(target)
@@ -752,7 +954,18 @@ local function buildMountTab(parent)
       rows[#rows + 1] = {
         label = itemName(target), icon = itemIcon(target), dim = collected,
         tooltip = M:TargetTooltip(target),
-        cell = function()
+        onRightClick = function(owner)
+          RR.ShowMenu(owner, {
+            { text = itemName(target), isTitle = true },
+            { text = L.ATTEMPTS_RESET, disabled = M:GetAttempts(target.itemID) == 0,
+              func = function() M:ResetAttempts(target.itemID) end },
+          })
+        end,
+        cell = function(colKey)
+          if colKey == "attempts" then
+            local count = M:GetAttempts(target.itemID)
+            return RR.FormatState("info", count > 0 and tostring(count) or "-"), M:TargetTooltip(target)
+          end
           if collected then return RR.FormatState("na", L.FARM_COLLECTED_SHORT) end
           local total = #by.chance + #by.locked + #by.ineligible + #by.unknown
           return RR.FormatState(#by.chance > 0 and "done" or "open", string.format("%d/%d", #by.chance, total)),

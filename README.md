@@ -1,6 +1,6 @@
 # ResetRadar
 
-Lichtgewicht WoW Retail-addon (Midnight, Interface 120105/120100): een dagelijkse/wekelijkse checklist over al je karakters, plus twee modules: **Farm Targets** (standaard aan) en **Loot Manager** (standaard **uit**).
+Lichtgewicht WoW Retail-addon (Engels en Duits) (Midnight, Interface 120105/120100): een dagelijkse/wekelijkse checklist over al je karakters, plus twee modules: **Farm Targets** (standaard aan) en **Loot Manager** (standaard **uit**).
 
 ## Installatie
 
@@ -67,6 +67,12 @@ RR:RegisterItem({
   encounter = "The Lich King", difficulties = { 6 }, resetType = "weekly" } } },
 ```
 
+**Pogingen (zoals Rarity):** elke geslaagde kill (`ENCOUNTER_END`) op de boss en moeilijkheid van een nog niet verzameld farm target of Want-item telt één poging, hooguit één per karakter per lockout. Het aantal staat achter de naam (`[37 att.]`), in de tooltip en in een kolom van het tabblad *Mounts*. Na het verzamelen blijft "verzameld na N pogingen" staan. Rechtsklik → *Reset attempt counter*.
+
+**Meldingen:** als een nog niet verzameld target dropt (bij jou of een groepslid, via `ENCOUNTER_LOOT_RECEIVED`/`CHAT_MSG_LOOT`) of verzameld wordt, verschijnt een raid-warning-tekst plus geluid (beide uit te zetten). "Verzameld" meldt hij alleen na een echt collect-event, dus niet bij het inloggen.
+
+Het vinkje **Hide collected** bovenin *Farm Targets* en *Mounts* is dezelfde instelling als in de opties.
+
 Statussen per karakter: **Chance** (nog een kill/loot-roll beschikbaar), **Locked** (deze reset al gedood), **No** (niet geschikt), **?** (karakter nog niet gescand). Er worden nooit dropkansen getoond. Mounts, pets, toys en transmog worden account-breed als "collected" herkend en grijs getoond of verborgen (instelbaar). Het tabblad *Mounts* sorteert gevolgde mounts op het aantal karakters dat nog een kans heeft.
 
 ## Collections: ontbrekende mounts en transmog per raid
@@ -83,6 +89,12 @@ Module **Collections** (standaard aan), tabblad **Transmog**:
 - Elke lootregel krijgt een **ster (Want)**. Klik erop en het item komt voor de gekozen moeilijkheid in de checklist onder *Wanted loot*, met per karakter of die boss deze reset nog te doen is (*Chance*) of al gedood is (*Locked*). Nog een keer klikken haalt hem weg. Telt mee in de samenvatting (minimap/login) zolang het item niet verzameld is.
 - Een **vinkje** op het icoon als de appearance (of mount) al verzameld is op je account.
 - Een **balk onder de Adventure Guide** met per moeilijkheid hoeveel appearances je in die instance nog mist (huidige moeilijkheid tussen [ ]), plus de geselecteerde boss.
+
+**Want vanuit de Transmog-tab:** rechtsklik op een raid/moeilijkheid of op een boss: *Want all N missing items* zet alles wat daar nog mist in één keer in de checklist (of haalt het weer weg).
+
+**Tabblad Tier sets:** per klasse waar je een karakter van hebt, per moeilijkheid hoeveel stukken van de huidige tier-set je nog mist (bijv. `2/5`), met de namen in de tooltip. Het huidige tier = de class-sets van de huidige expansie uit de nieuwste patch, alleen varianten met een raid-moeilijkheid als naam (PvP-sets vallen weg). Bron: `C_TransmogSets`.
+
+**Tabblad Planner (weekplanner):** kies een karakter; je ziet per raid/moeilijkheid hoeveel missende appearances die alt deze week nog kan halen bij bosses die nog open staan, gesorteerd op het meeste. Kolommen: appearances, open bosses, en hoeveel Want-items daar nog een kans hebben. Opties: dungeons meenemen, alleen het eigen armortype (plus mantels, wapens en overig). Rechtsklik = alles van die rij Want.
 
 Beperkingen: alleen loot die de journal als bossdrop toont. Mounts van rare spawns, reputatie of achievements, en tier-stukken die uit tokens komen, worden niet gevonden. "Mist" geldt voor je hele account.
 

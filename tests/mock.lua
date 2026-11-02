@@ -137,6 +137,18 @@ C_EncounterJournal = { GetLootInfoByIndex = function(i)
   if lootReads <= 4 then return { itemID = it.itemID, encounterID = it.encounterID } end -- first pass: not loaded yet
   return { itemID = it.itemID, encounterID = it.encounterID, link = "|Hitem:" .. it.itemID .. ":" .. MOCK_EJ_DIFF .. "|h[x]|h" }
 end }
+C_TransmogSets = {
+  GetAllSets = function() return {
+    { setID = 1, name = "Mage Tier", label = "Test Raid", description = "Normal", classMask = 128, expansionID = 11, patchID = 2 },
+    { setID = 2, name = "Mage Tier", label = "Test Raid", description = "Heroic", classMask = 128, expansionID = 11, patchID = 2 },
+    { setID = 3, name = "Old Mage Tier", label = "Old Raid", description = "Heroic", classMask = 128, expansionID = 11, patchID = 1 },
+    { setID = 4, name = "Gladiator", label = "PvP", description = "Gladiator", classMask = 128, expansionID = 11, patchID = 3 },
+    { setID = 5, name = "Warrior Tier", label = "Test Raid", description = "Normal", classMask = 1, expansionID = 11, patchID = 2 },
+  } end,
+  GetSetPrimaryAppearances = function(id) return { { appearanceID = id * 10, collected = true }, { appearanceID = id * 10 + 1, collected = false } } end,
+}
+function GetLocale() return MOCK_LOCALE or "enUS" end
+function PlaySound(id) MOCK_SOUND = id end
 function GetBuildInfo() return "12.1.5", "99999", "Oct 1 2026", 120105 end
 Settings = { RegisterCanvasLayoutCategory = function(p, n) return { GetID = function() return 1 end } end, RegisterAddOnCategory = function() end, OpenToCategory = function() MOCK_SETTINGS_OPENED = true end }
 SlashCmdList = {}
